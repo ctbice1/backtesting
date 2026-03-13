@@ -5,3 +5,4 @@ __pycache__/
 tickers/
 *.egg-info/
 *.pkl
+*.txt
