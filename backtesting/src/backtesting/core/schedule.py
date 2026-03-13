@@ -15,44 +15,57 @@ WEEKDAY_MAP = {
 }
 
 class ScheduleFormat(Enum):
+    """Enumeration of supported schedule cadence types."""
+
     DAYS = auto()
     WEEKDAY = auto()
     WEEKLY = auto()
     MONTHLY = auto()
     YEARLY = auto()
 
-    def __lt__(self, other):
+    def __lt__(self, other: object) -> bool:
+        """Returns ordering by enum value for stable sorting."""
         if not isinstance(other, ScheduleFormat):
             return NotImplemented
         return self.value < other.value
 
-    def __hash__(self):
+    def __hash__(self) -> int:
+        """Returns a stable hash for mapping/set usage."""
         return hash((self.name, self.value))
 
 class Schedule:
-    def __init__(self, fmt: ScheduleFormat, value: str|int|None = None):
-        self.fmt: ScheduleFormat = fmt
-        self.value: str|int|None = value
+    """Schedule definition used to generate recurring activity dates."""
 
-    def __eq__(self, other):
+    def __init__(self, fmt: ScheduleFormat, value: str | int | None = None) -> None:
+        """Initializes a schedule with format and optional value."""
+        self.fmt: ScheduleFormat = fmt
+        self.value: str | int | None = value
+
+    def __eq__(self, other: object) -> bool:
+        """Returns whether two schedules are equivalent."""
         if not isinstance(other, Schedule):
             return NotImplemented
         return (self.fmt == other.fmt) and (self.value == other.value)
 
-    def __lt__(self, other):
+    def __lt__(self, other: object) -> bool:
+        """Returns ordering for deterministic sorting of schedules."""
         if not isinstance(other, Schedule):
             return NotImplemented
         if self.fmt == other.fmt:
             return self.value < other.value
         return self.fmt < other.fmt
 
-    def __hash__(self):
+    def __hash__(self) -> int:
+        """Returns a stable hash for mapping/set usage."""
         return hash((self.fmt, self.value))
 
-    def __repr__(self):
+    def __repr__(self) -> str:
+        """Returns a concise schedule representation."""
         return f"{self.fmt}: {self.value}"
 
-    def get_fixed_dates(self, date_range: np.ndarray[np.datetime64] | pd.DatetimeIndex) -> list:
+    def get_fixed_dates(
+        self, date_range: np.ndarray[np.datetime64] | pd.DatetimeIndex
+    ) -> list[pd.Timestamp]:
         """Returns a list of dates generated according to a fixed schedule."""
 
         beginning = date_range[0]

@@ -21,6 +21,7 @@ DEFAULT_FIELDS = (
 def _resolve_results_path(path: str) -> str:
     """Validates and normalizes the required results file path."""
     def _is_hashed_results_file(candidate_path: str) -> bool:
+        """Returns whether a path matches results_<hash>.pkl naming."""
         filename = os.path.basename(candidate_path)
         return filename.startswith("results_") and filename.endswith(".pkl")
 
@@ -179,6 +180,7 @@ def plot_ranked_results_against_parameter(results: pd.DataFrame, parameter: str)
 
 
 def main() -> None:
+    """Parses CLI arguments, loads results, and renders analysis output."""
     parser = argparse.ArgumentParser(description="Visualize simulation results from pickle output.")
     parser.add_argument("results_file", help="Path to results_<hash>.pkl file")
     parser.add_argument(

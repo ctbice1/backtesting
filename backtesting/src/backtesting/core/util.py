@@ -1,7 +1,5 @@
 """Core utility helpers used by backtesting workflows."""
 
-from calendar import Calendar
-import datetime
 import heapq
 import importlib
 import os
@@ -10,7 +8,7 @@ import pkgutil
 import sys
 import tempfile
 import time
-from typing import Callable, Iterable
+from typing import Iterable
 
 import numpy as np
 import pandas as pd
@@ -60,7 +58,7 @@ def load_yaml_config(config_file_path: str) -> dict:
 
     return config
 
-def _normalize_schedule_config(schedule_config) -> dict | None:
+def _normalize_schedule_config(schedule_config: object) -> dict[str, object] | None:
     """Normalizes shorthand and mapping schedule config declarations."""
     if schedule_config is None:
         return None
@@ -91,7 +89,7 @@ def _build_schedule(schedule_config: dict, context: str) -> Schedule:
         print(f"Invalid ScheduleFormat: {schedule_format}")
         sys.exit(-1)
 
-def get_shared_test_config(config: dict, test_type: str | None = None):
+def get_shared_test_config(config: dict[str, object], test_type: str | None = None) -> dict[str, object]:
     """Loads shared test configuration parameters."""
 
     # Check if securities to test were provided
@@ -388,7 +386,6 @@ def get_shared_test_config(config: dict, test_type: str | None = None):
         "rebalance_increment": rebalance_increment,
         "dates": config["dates"],
         "trace": config.get("trace", False),
-        "print_results": config.get("print_results", False),
         "track_performance": config["track_performance"],
     }
 
@@ -469,25 +466,6 @@ def get_historical_data(securities: tuple[str]) -> tuple:
 
     return price_data, distribution_data
 
-def get_calendar(first_year: int) -> dict[int, dict[int, list[datetime.date]]]:
-    """Returns a 'clean' calendar which exclude days not in a year, or days not in a month."""
-    calendar = {year: Calendar().yeardatescalendar(year, width=1) for year in range(first_year, datetime.date.today().year + 1)}
-    for year, cal in calendar.items():
-        corrected_calendar = {}
-        for index, month in enumerate(cal):
-            current_month = index + 1
-            days = [day for week in month[0] for day in week if day.year == year and day.month == current_month]
-            corrected_calendar[current_month] = days
-        calendar[year] = corrected_calendar
-    return calendar
-
-def gen_calendar(first_year: int):
-    """Generator yielding days in a 'clean' calendar."""
-    for year in get_calendar(first_year).values():
-        for month in year.values():
-            for day in month:
-                yield day
-
 def download_historical_data(ticker: str, tickers_dir: str) -> None:
     """Downloads ticker historical data."""
 
@@ -521,35 +499,6 @@ def download_historical_data(ticker: str, tickers_dir: str) -> None:
     finally:
         if os.path.exists(temp_path):
             os.remove(temp_path)
-
-def top_n_of_m(n: int, m: list, top_fn: Callable) -> list:
-    """Returns the top N out of M items."""
-    if n > len(m):
-        print("Number of results N must be less than or equal to number of choices M")
-        return []
-
-    items = []
-    while len(items) < n:
-        items.append(m.pop(m.index(max(m, key=top_fn))))
-
-    return items
-
-def top_n_of_m_incremental(n: int, m: Iterable, tasks: int, top_fn: Callable) -> list:
-    """Returns the top N out of M items."""
-    _ = tasks
-    items: list[tuple[float, int, object]] = []
-    tie_breaker = 0
-    for candidate in m:
-        tie_breaker += 1
-        score = top_fn(candidate)
-        heap_item = (score, tie_breaker, candidate)
-        if len(items) < n:
-            heapq.heappush(items, heap_item)
-        elif score > items[0][0]:
-            heapq.heapreplace(items, heap_item)
-
-    ranked_items = sorted(items, key=lambda entry: entry[0], reverse=True)
-    return [entry[2] for entry in ranked_items]
 
 def top_n_grouped_incremental(
     n: int, m: Iterable, size: int,
@@ -598,43 +547,3 @@ def top_n_grouped_incremental(
                 pickle.dump(results, f)
 
     return checkpoint
-
-
-def get_shared_price_history(tickers: Iterable[str]) -> pd.DataFrame:
-    """Returns a shared close-price history frame for all tickers."""
-    price_history = pd.DataFrame()
-
-    tickers_dir = os.path.join(os.getcwd(), "tickers")
-    if not os.path.exists(tickers_dir):
-        os.mkdir(tickers_dir)
-
-    for ticker in tickers:
-        ticker_file = os.path.join(tickers_dir, f"{ticker}.pkl")
-        if not os.path.exists(ticker_file):
-            try:
-                download_historical_data(ticker, tickers_dir)
-            except RuntimeError:
-                continue
-
-        try:
-            raw = pd.read_pickle(ticker_file)
-        except (EOFError, pickle.UnpicklingError, ValueError):
-            try:
-                download_historical_data(ticker, tickers_dir)
-                raw = pd.read_pickle(ticker_file)
-            except RuntimeError:
-                continue
-
-        raw = raw.droplevel(1, axis=1)
-        raw = raw.drop(columns=["Open", "High", "Low", "Volume", "Stock Splits", "Dividends", "Adj Close"])
-        if "Capital Gains" in raw.columns:
-            raw = raw.drop(columns=["Capital Gains"])
-
-        raw = raw.rename(columns={"Close": ticker})
-        price_history = price_history.join(raw, how="outer")
-
-    price_history = price_history.dropna()
-    if len(price_history) == 0:
-        raise RuntimeError(f"Unable to download data for: {', '.join(tickers)}")
-
-    return price_history

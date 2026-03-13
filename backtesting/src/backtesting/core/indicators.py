@@ -9,7 +9,10 @@ def _validated_window(length: int) -> int:
 
 
 class SimpleMovingAverage:
-    def __init__(self, length: int, prices: np.ndarray):
+    """Simple moving average indicator."""
+
+    def __init__(self, length: int, prices: np.ndarray) -> None:
+        """Builds an SMA history over the provided price series."""
         self.length = _validated_window(length)
 
         # Generate a historical moving average
@@ -31,11 +34,15 @@ class SimpleMovingAverage:
                 "valid",
             )
 
-    def __repr__(self):
+    def __repr__(self) -> str:
+        """Returns a readable indicator label."""
         return f"{self.length} day simple moving average"
 
 class SimpleMovingStdDev:
-    def __init__(self, length: int, prices: np.ndarray):
+    """Rolling sample standard deviation indicator."""
+
+    def __init__(self, length: int, prices: np.ndarray) -> None:
+        """Builds a rolling standard-deviation history for prices."""
         self.length = _validated_window(length)
 
         # Generate a historical standard deviation
@@ -72,7 +79,10 @@ class SimpleMovingStdDev:
         self.history[self.length - 1:] = std_dev
 
 class SimpleMovingVariance:
-    def __init__(self, length: int, prices: np.ndarray):
+    """Rolling sample variance indicator."""
+
+    def __init__(self, length: int, prices: np.ndarray) -> None:
+        """Builds a rolling variance history for prices."""
         self.length = _validated_window(length)
 
         # Generate a historical standard deviation

@@ -1,7 +1,10 @@
 import numpy as np
 
 class Portfolio:
-    def __init__(self, tickers: tuple, weights: tuple, track: bool = False):
+    """Stateful portfolio model used during backtest execution."""
+
+    def __init__(self, tickers: tuple[str, ...], weights: tuple[float, ...], track: bool = False) -> None:
+        """Initializes portfolio holdings, weights, and execution totals."""
         self.tickers: tuple[str] = tickers
         self.weights: tuple[float] = np.array(weights).round(decimals=4)
         self.ticker_idx: dict[str,int] = {tickers[i]: i for i in range(len(tickers))}
@@ -12,13 +15,14 @@ class Portfolio:
         self.total_distribution = 0.0
         self.unallocated_capital = 0.0
 
-    def current_value(self, price_data: np.ndarray):
+    def current_value(self, price_data: np.ndarray) -> float:
+        """Returns the current total market value of all holdings."""
         return np.sum(self.current_shares * price_data)
 
-    def allocate(self, date_string: str, price_data: np.ndarray, amount: float, details: bool = False, add_price_variance: bool = False):
+    def allocate(
+        self, date_string: str, price_data: np.ndarray, amount: float, details: bool = False
+    ) -> None:
         """Performs an allocation to all tickers on a specific date."""
-
-        # details = True
 
         # Don't allocate anything less than $1
         if amount < 1.0:
@@ -68,7 +72,13 @@ class Portfolio:
         if details:
             print(f"Allocated ${np.sum(filtered_ticker_value_deltas):,.2f} -- " + ", ".join(f"${filtered_ticker_value_deltas[i]:,.2f} to {self.tickers[i]}" for i in range(len(self.tickers))) + f" on {date_string}")
 
-    def rebalance(self, date_string: str, price_data: np.ndarray, target_weights: tuple = None, details: bool = False, add_price_variance: bool = False):
+    def rebalance(
+        self,
+        date_string: str,
+        price_data: np.ndarray,
+        target_weights: tuple[float, ...] | None = None,
+        details: bool = False,
+    ) -> None:
         """Performs a rebalance on all tickers in a portfolio."""
 
         # Use custom weights if provided

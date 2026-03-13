@@ -89,7 +89,7 @@ Each test item under `single` or `simulate` accepts these blocks:
 - `trace` (optional)
   - Enables detailed transaction output during execution
 - `track_performance` (optional)
-  - Tracks share history for strategy performance reporting
+  - Tracks share history for strategy performance processing
 
 ### Schedule Formats
 

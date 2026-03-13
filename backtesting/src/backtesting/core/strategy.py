@@ -1,6 +1,5 @@
 from abc import abstractmethod
 import heapq
-import sys
 
 import pandas as pd
 import numpy as np
@@ -10,7 +9,10 @@ from backtesting.core.portfolio import Portfolio
 from backtesting.core.schedule import Schedule, ScheduleFormat
 
 class Strategy:
-    def __init__(self, *args, **kwargs):
+    """Base strategy with common allocation/distribution execution plumbing."""
+
+    def __init__(self, *args: object, **kwargs: object) -> None:
+        """Initializes strategy scheduling and optional tracking settings."""
         allocation_schedule = kwargs.get("allocation_schedule")
         self._allocation_schedule: Schedule = allocation_schedule or Schedule(ScheduleFormat.DAYS, 365)
         self._initial_allocation = kwargs.get("initial_allocation", 0)
@@ -20,7 +22,6 @@ class Strategy:
 
         self.activity_schedule: list[Activity] = []
         self.allocation_dates: dict = {}
-        self.rebalance_dates: list = []
 
         self.track = kwargs.get("track", False)
         self.share_history = {}
@@ -28,14 +29,15 @@ class Strategy:
         # Convert activity dates to a priority queue
         heapq.heapify(self.activity_schedule)
 
-    def parameters(self) -> dict:
+    def parameters(self) -> dict[str, object]:
+        """Returns strategy parameters captured for reporting/output."""
         return {
             "allocation_schedule": self._allocation_schedule,
             "initial_allocation": self._initial_allocation,
             "yearly_allocation": self._yearly_allocation
         }
 
-    def _set_allocations(self, price_history_dates: np.ndarray[pd.Timestamp]):
+    def _set_allocations(self, price_history_dates: np.ndarray[pd.Timestamp]) -> None:
         '''Configures the allocation amount.'''
         if len(price_history_dates) == 0:
             return
@@ -73,13 +75,8 @@ class Strategy:
             self.allocation_dates[bounded_price_history_dates[0]] = self._initial_allocation
             return
 
-        if days_in_full_year is None:
-            print("Unable to determine allocation schedule.")
-            sys.exit(-1)
-
         # Get a per-allocation amount for a full year
         per_allocation_amount = round(self._yearly_allocation / days_in_full_year, 2)
-        remainder_allocation_amount = round(self._yearly_allocation - (per_allocation_amount * days_in_full_year), 2)
 
         # Set the initial allocation
         initial_allocation_date = bounded_price_history_dates[0]
@@ -93,7 +90,9 @@ class Strategy:
                 if pd.to_datetime(date).year == year and date != initial_allocation_date:
                     self.allocation_dates[date] = per_allocation_amount
 
-    def _set_passive_activity_schedule(self, price_history_dates: tuple[np.ndarray], distribution_history_dates: tuple[np.ndarray]) -> None:
+    def _set_passive_activity_schedule(
+        self, price_history_dates: np.ndarray, distribution_history_dates: np.ndarray | None
+    ) -> None:
         '''Sets allocation and distribution activities and enqueues them for execution.'''
 
         # Set allocation and rebalance dates
@@ -103,6 +102,7 @@ class Strategy:
         # Add allocation dates and distribution dates
         for date in self.allocation_dates:
             heapq.heappush(self.activity_schedule, Allocate(date, self.allocation_dates[date]))
+
         if distribution_history_dates is not None:
             for date in pd.to_datetime([date for date in distribution_history_dates if date >= self._start_date]):
                 heapq.heappush(self.activity_schedule, Distribute(date))
@@ -112,8 +112,14 @@ class Strategy:
 
         return self
 
-    def performance(self, price_history: np.ndarray, price_history_dates: np.ndarray, yearly: bool = False):
+    def performance(
+        self, price_history: np.ndarray, price_history_dates: np.ndarray, yearly: bool = False
+    ) -> None:
         '''Print performance.'''
+        _ = yearly
+
+        if not self.share_history:
+            return
 
         # Convert share history into a dataframe
         df = pd.DataFrame.from_dict(self.share_history, orient="index")
@@ -135,38 +141,9 @@ class Strategy:
         # sys.exit()
         return
 
-        # Display initial and final values
-        # begin_value = portfolio.historical_value_on(self._begin)
-        # end_value = portfolio.historical_value_on(self._end)
-        # print(f'Initial value: ${begin_value:,.2f}', self._begin)
-        # print(f'Final value: ${end_value:,.2f}', self._end)
-
-        if yearly:
-
-            # Get beginning and end dates for each year covered
-            dates = {}
-            years = sorted({date.year for date in self._time_period})
-            for year in years:
-                dates[year] = (
-                    min({day for day in self._time_period if day.year == year}),
-                    max({day for day in self._time_period if day.year == year})
-                )
-
-            # Display yearly gain / loss
-            # for year, (beginning, end) in dates.items():
-            #     start_value = portfolio.historical_value_on(beginning)
-            #     finish_value = portfolio.historical_value_on(end)
-            #     print(f'Portfolio value difference in {year}:')
-            #     print(f'  Beginning:\t${start_value:,.2f}')
-            #     print(f'  End:\t\t${finish_value:,.2f}')
-            #     print(f'  Gain/Loss:\t${finish_value - start_value:,.2f}')
-            #     print(f'  Percent:\t{(finish_value - start_value) / start_value:.2%}')
-
-        # Display compound annual growth rate
-        cagr = ((end_value / begin_value) ** (1 / len({date.year for date in self._time_period})) - 1)
-        print(f'Compound annual growth rate: {cagr:.2%}')
-
-    def execute(self, historical_data: tuple, dates: tuple, portfolio: Portfolio, trace: bool = False, add_price_variance=False) -> Portfolio:
+    def execute(
+        self, historical_data: tuple, dates: tuple, portfolio: Portfolio, trace: bool = False
+    ) -> tuple[Portfolio, dict[str, object]]:
         '''Set the activity schedule and execute the strategy.'''
 
         # Extract historical data and indices
@@ -205,16 +182,14 @@ class Strategy:
                     date_string,
                     prices,
                     activity.amount,
-                    details=trace,
-                    add_price_variance=add_price_variance
+                    details=trace
                 )
             elif isinstance(activity, Rebalance):
                 portfolio.rebalance(
                     date_string,
                     prices,
                     activity.weights,
-                    details=trace,
-                    add_price_variance=add_price_variance
+                    details=trace
                 )
             elif isinstance(activity, Distribute):
                 if distribution_history_dates is None or distribution_history is None:
@@ -229,8 +204,7 @@ class Strategy:
                     date_string,
                     prices,
                     distribution_amount,
-                    details=trace,
-                    add_price_variance=add_price_variance
+                    details=trace
                 )
 
             if self.track:
@@ -247,5 +221,8 @@ class Strategy:
         return portfolio, self.parameters()
 
     @abstractmethod
-    def procedure(self, historical_data: tuple, indices: tuple, portfolio: Portfolio, trace: bool):
+    def procedure(
+        self, historical_data: tuple, indices: tuple, portfolio: Portfolio, trace: bool
+    ) -> None:
+        """Schedules strategy-specific activity events before execution."""
         pass

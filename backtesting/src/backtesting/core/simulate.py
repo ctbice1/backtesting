@@ -7,6 +7,7 @@ from multiprocessing import Pool, shared_memory
 import os
 import pickle
 import sys
+from typing import Iterator
 
 import numpy as np
 
@@ -28,7 +29,7 @@ _WORKER_DISTRIBUTION_SHM = None
 _WORKER_PRICE_DATES_SHM = None
 _WORKER_DISTRIBUTION_DATES_SHM = None
 
-def _is_heap_result_item(item) -> bool:
+def _is_heap_result_item(item: object) -> bool:
     """Returns True when an item is in (score, tiebreaker, payload) heap format."""
     return (
         isinstance(item, (tuple, list))
@@ -69,13 +70,13 @@ def _normalize_grouped_results_for_incremental(raw_results: dict) -> defaultdict
 
     return normalized_results
 
-def _heap_payload(entry) -> tuple:
+def _heap_payload(entry: tuple | list) -> tuple:
     """Extracts a payload tuple from either heap or flattened result entry."""
     if _is_heap_result_item(entry):
         return tuple(entry[2])
     return tuple(entry)
 
-def gen_weights(tickers: tuple[str], increment: float = 0.05):
+def gen_weights(tickers: tuple[str, ...], increment: float = 0.05) -> Iterator[tuple[float, ...]]:
     """Generates portfolios using combinations of ticker weights."""
 
     # Check if more than 1 ticker was provided
@@ -108,7 +109,8 @@ def gen_weights(tickers: tuple[str], increment: float = 0.05):
             continue
 
         # Recursively find valid combinations of remaining distributable weights
-        def get_remaining_weights(remaining, count):
+        def get_remaining_weights(remaining: int, count: int) -> Iterator[list[float]]:
+            """Yields valid remaining-weight allocations that sum exactly."""
             if count == 1:
                 if remaining >= min_rem_ticker_weight and remaining % step_rem_ticker_weight == 0:
                     yield [round(remaining / scale, 4)]
@@ -127,7 +129,7 @@ def gen_test_dates(
     price_history_dates: np.ndarray[np.datetime64],
     start_date: np.datetime64 | None = None,
     stop_date: np.datetime64 | None = None,
-):
+) -> Iterator[np.datetime64]:
     """Returns dates for backtesting."""
 
     # Sample size
@@ -178,7 +180,11 @@ def gen_test_dates(
                 continue
             yield from sample_strategy(trading_days, sample_ratio=sample_size)
 
-def sample_strategy(population: list[np.datetime64], sample_ratio: float = 0.5, strategy: str = "random"):
+def sample_strategy(
+    population: list[np.datetime64] | np.ndarray,
+    sample_ratio: float = 0.5,
+    strategy: str = "random",
+) -> Iterator[np.datetime64]:
     """Randomly selects trading days to simulate based on a specified sampling strategy."""
     sampling_strategy = strategy.lower()
 
@@ -213,7 +219,7 @@ def sample_strategy(population: list[np.datetime64], sample_ratio: float = 0.5, 
             yield from days[:sample_size]
             #results.extend(days[:sample_size])
 
-def _iter_sim_parameters_from_index(sim_axes: dict, start_index: int = 0):
+def _iter_sim_parameters_from_index(sim_axes: dict[str, tuple], start_index: int = 0) -> Iterator[tuple]:
     """Yields deterministic Cartesian product cases from a starting global index."""
     weights = sim_axes["weights"]
     test_dates = sim_axes["test_dates"]
@@ -296,7 +302,7 @@ def _build_simulation_cache_key(config: dict, price_dates: np.ndarray) -> str:
     serialized = json.dumps(payload, sort_keys=True, separators=(",", ":"))
     return hashlib.sha1(serialized.encode("utf-8")).hexdigest()[:12]
 
-def get_sim_parameters(config: dict, price_dates: np.ndarray):
+def get_sim_parameters(config: dict, price_dates: np.ndarray) -> tuple[dict[str, tuple], int]:
     """Generates or loads simulation axes used for deterministic parameter expansion."""
     simulation_key = _build_simulation_cache_key(config, price_dates)
 
@@ -398,7 +404,7 @@ def _init_worker_shared_arrays(historical_data: tuple, dates: tuple) -> None:
         _WORKER_DISTRIBUTION_DATES_SHM = None
         _WORKER_DISTRIBUTION_DATES = None
 
-def _test_portfolio(config: dict, test_case: tuple):
+def _test_portfolio(config: dict, test_case: tuple) -> tuple:
     """Tests a strategy on a single parameter combination."""
     weights, start_date, allocation_schedule, rebalance_schedule = test_case
     tickers = tuple(security[0] for security in config["securities"])

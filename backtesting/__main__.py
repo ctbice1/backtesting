@@ -1,7 +1,5 @@
-from datetime import datetime
 import sys
 
-from dateutil.relativedelta import relativedelta
 import numpy as np
 
 from backtesting.core.portfolio import Portfolio
@@ -99,17 +97,6 @@ def single_test(config: dict):
     print(f"Final balance: ${final_value:,.2f}")
     print(f"Net new capital: ${portfolio.total_new_capital:,.2f}")
     print(f"Distributions: ${portfolio.total_distribution:,.2f}\n")
-
-    print_yield = False
-    if distribution_history_dates is not None and print_yield:
-        ttm_start_date = (np.datetime64(datetime.now()) - relativedelta(months=12)).date()
-        ttm_filter = (distribution_history_dates <= stop_date) & (distribution_history_dates >= ttm_start_date)
-        ttm_distributions = np.sum(distribution_history[ttm_filter], axis=0)
-        ttm_total_distributions = np.sum(ttm_distributions * portfolio.current_shares)
-        print(f"Final portfolio yield (TTM): {(ttm_total_distributions / final_value):.2%}")
-        print(f"Final portfolio yield (year): ${ttm_total_distributions:.2f}")
-        print(f"Final portfolio yield (month): ${(ttm_total_distributions / 12):.2f}")
-
 
 def main():
     if len(sys.argv) < 2:

@@ -12,7 +12,8 @@ from backtesting.core.util import get_historical_data
 
 class ScheduledRebalance(Strategy):
     '''Basic Rebalance Strategy'''
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args: object, **kwargs: object) -> None:
+        """Initializes a strategy that rebalances on a fixed schedule."""
         super().__init__(**kwargs)
         schedule = kwargs.get("schedule")
         if isinstance(schedule, Schedule):
@@ -36,7 +37,9 @@ class ScheduledRebalance(Strategy):
             print(f"Invalid ScheduleFormat: {schedule_format}")
             sys.exit(-1)
 
-    def procedure(self, historical_data: tuple, indices: tuple, portfolio: Portfolio, trace: bool):
+    def procedure(
+        self, historical_data: tuple, indices: tuple, portfolio: Portfolio, trace: bool
+    ) -> None:
         '''Rebalances over a fixed (scheduled) time period.'''
 
         # Add rebalance operations
@@ -48,7 +51,8 @@ class ScheduledRebalance(Strategy):
 
 class SimpleMovingAverageRebalance(Strategy):
     '''Basic Rebalance Strategy'''
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args: object, **kwargs: object) -> None:
+        """Initializes SMA threshold rebalance parameters."""
         super().__init__(**kwargs)
         self.dxy_adjusted = kwargs.get("dxy_adjusted", False)
         self.target = kwargs.get("target", None)
@@ -59,7 +63,9 @@ class SimpleMovingAverageRebalance(Strategy):
             print(f"Please provide a target ticker to use for the {__class__.__name__} strategy.")
             sys.exit(-1)
 
-    def procedure(self, historical_data: tuple, indices: tuple, portfolio: Portfolio, trace: bool):
+    def procedure(
+        self, historical_data: tuple, indices: tuple, portfolio: Portfolio, trace: bool
+    ) -> None:
         '''Rebalances over a fixed (scheduled) time period.'''
 
         # Get historical data for target
@@ -151,13 +157,16 @@ class SimpleMovingAverageRebalance(Strategy):
 
 class StdDevRebalance(SimpleMovingAverageRebalance):
     '''Volatility adjusted simple moving average rebalance Strategy'''
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args: object, **kwargs: object) -> None:
+        """Initializes SMA and deviation-window rebalance parameters."""
         super().__init__(**kwargs)
         self.dxy_adjusted = kwargs.get("dxy_adjusted", False)
         self.long_length = kwargs.get("long_length", 200)
         self.short_length = kwargs.get("short_length", 50)
 
-    def procedure(self, historical_data: tuple, indices: tuple, portfolio: Portfolio, trace: bool):
+    def procedure(
+        self, historical_data: tuple, indices: tuple, portfolio: Portfolio, trace: bool
+    ) -> None:
         '''Rebalances over a fixed (scheduled) time period.'''
 
         # Get historical data for target and volatility
@@ -222,9 +231,6 @@ class StdDevRebalance(SimpleMovingAverageRebalance):
         long_target_plus_2_std_dev = long_target_sma + (2 * short_target_sma_std_dev)
         long_target_minus_2_std_dev = long_target_sma - (2 * short_target_sma_std_dev)
 
-        short_target_plus_2_std_dev = short_target_sma + (2 * long_target_sma_std_dev)
-        short_target_minus_2_std_dev = short_target_sma - (2 * long_target_sma_std_dev)
-
         # Default to portfolio weights
         weights = portfolio.weights
 
@@ -261,7 +267,8 @@ class StdDevRebalance(SimpleMovingAverageRebalance):
 
 class SMACrossRebalance(SimpleMovingAverageRebalance):
     '''Volatility adjusted simple moving average rebalance Strategy'''
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args: object, **kwargs: object) -> None:
+        """Initializes dual-SMA crossover rebalance parameters."""
         super().__init__(**kwargs)
         self.dxy_adjusted = kwargs.get("dxy_adjusted", False)
         self.long_length = kwargs.get("long_length", None)
@@ -273,7 +280,9 @@ class SMACrossRebalance(SimpleMovingAverageRebalance):
             print(f"Please provide a short SMA length to use for the {__class__.__name__} strategy.")
             sys.exit(-1)
 
-    def procedure(self, historical_data: tuple, indices: tuple, portfolio: Portfolio, trace: bool):
+    def procedure(
+        self, historical_data: tuple, indices: tuple, portfolio: Portfolio, trace: bool
+    ) -> None:
         '''Rebalances over a fixed (scheduled) time period.'''
 
         # Get historical data for target and volatility
@@ -358,7 +367,8 @@ class SMACrossRebalance(SimpleMovingAverageRebalance):
 
 class VolatilityAdjustedSMARebalance(SimpleMovingAverageRebalance):
     '''Volatility adjusted simple moving average rebalance Strategy'''
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args: object, **kwargs: object) -> None:
+        """Initializes volatility-gated SMA rebalance parameters."""
         super().__init__(**kwargs)
         self.dxy_adjusted = kwargs.get("dxy_adjusted", False)
         self.volatility_length = kwargs.get("volatility_length", self.length)
@@ -367,7 +377,9 @@ class VolatilityAdjustedSMARebalance(SimpleMovingAverageRebalance):
             print(f"Please provide a volatility ticker to use for the {__class__.__name__} strategy.")
             sys.exit(-1)
 
-    def procedure(self, historical_data: tuple, indices: tuple, portfolio: Portfolio, trace: bool):
+    def procedure(
+        self, historical_data: tuple, indices: tuple, portfolio: Portfolio, trace: bool
+    ) -> None:
         '''Rebalances over a fixed (scheduled) time period.'''
 
         # Get historical data for target and volatility
@@ -378,15 +390,11 @@ class VolatilityAdjustedSMARebalance(SimpleMovingAverageRebalance):
 
             # Get SMA and Standard Deviation history for target
             target_sma = SimpleMovingAverage(self.length, target_price_data).history
-            target_variance = SimpleMovingVariance(self.volatility_length, target_price_data).history
-
             (volatility_price_history, _) = get_historical_data((self.volatility,))
             volatility_price_dates, volatility_price_data = volatility_price_history
             volatility_price_data = volatility_price_data[:,0]
 
             # Get SMA and Standard Deviation history for volatility
-            volatility_sma = SimpleMovingAverage(self.volatility_length, volatility_price_data).history
-            volatility_std_dev = SimpleMovingStdDev(self.volatility_length, volatility_price_data).history
             volatility_variance = SimpleMovingVariance(self.volatility_length, volatility_price_data).history
 
             # Restrict history to [start_date, stop_date]
@@ -396,13 +404,10 @@ class VolatilityAdjustedSMARebalance(SimpleMovingAverageRebalance):
             target_bounds_mask = (target_price_dates >= start_date) & (target_price_dates <= stop_date)
             target_price_data = target_price_data[target_bounds_mask]
             target_sma = target_sma[target_bounds_mask]
-            target_variance = target_variance[target_bounds_mask]
             target_price_dates = target_price_dates[target_bounds_mask]
 
             volatility_bounds_mask = (volatility_price_dates >= start_date) & (volatility_price_dates <= stop_date)
             volatility_price_data = volatility_price_data[volatility_bounds_mask]
-            volatility_sma = volatility_sma[volatility_bounds_mask]
-            volatility_std_dev = volatility_std_dev[volatility_bounds_mask]
             volatility_variance = volatility_variance[volatility_bounds_mask]
             volatility_price_dates = volatility_price_dates[volatility_bounds_mask]
 

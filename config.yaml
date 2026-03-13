@@ -1,48 +1,48 @@
 test:
-  # single:
-  #   - securities:
-  #       - ticker: TQQQ
-  #         weight: 1.0
-  #       - ticker: QQQ
-  #         weight: 0.0
-  #     strategy:
-  #       name: SimpleMovingAverageRebalance
-  #       target: ^NDX
-  #       primary: TQQQ
-  #       alternate: QQQ
-  #       dxy_adjusted: false
-  #     allocation:
-  #       mode: static
-  #       schedule:
-  #         format: DAYS
-  #         value: 7
-  #       initial: 10000
-  #       yearly: 6000
-  #     weights:
-  #       mode: static
-  #     dates:
-  #       start: "2026-01-30"
-  #     trace: false
-  simulate:
+  single:
     - securities:
         - ticker: TQQQ
           weight: 1.0
         - ticker: QQQ
           weight: 0.0
       strategy:
-        name: ScheduledRebalance
+        name: SimpleMovingAverageRebalance
+        target: ^NDX
+        primary: TQQQ
+        alternate: QQQ
+        dxy_adjusted: false
+      allocation:
+        mode: static
         schedule:
-          mode: static
           format: DAYS
           value: 7
-      allocation:
-        mode: dynamic
-        increment: 4
         initial: 10000
         yearly: 6000
       weights:
         mode: static
       dates:
         start: "2026-01-30"
-        # end: "2026-01-30"
-      trace: false
+  #     trace: false
+  # simulate:
+  #   - securities:
+  #       - ticker: TQQQ
+  #         weight: 1.0
+  #       - ticker: QQQ
+  #         weight: 0.0
+  #     strategy:
+  #       name: ScheduledRebalance
+  #       schedule:
+  #         mode: static
+  #         format: DAYS
+  #         value: 7
+  #     allocation:
+  #       mode: dynamic
+  #       increment: 4
+  #       initial: 10000
+  #       yearly: 6000
+  #     weights:
+  #       mode: static
+  #     dates:
+  #       start: "2026-01-30"
+  #       # end: "2026-01-30"
+  #     trace: false
