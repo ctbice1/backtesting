@@ -14,6 +14,7 @@ WEEKDAY_MAP = {
     "Sunday": 6
 }
 
+
 class ScheduleFormat(Enum):
     """Enumeration of supported schedule cadence types."""
 
@@ -32,6 +33,7 @@ class ScheduleFormat(Enum):
     def __hash__(self) -> int:
         """Returns a stable hash for mapping/set usage."""
         return hash((self.name, self.value))
+
 
 class Schedule:
     """Schedule definition used to generate recurring activity dates."""
@@ -192,3 +194,4 @@ class Schedule:
                 fixed_schedule_dates.append(allocation_date)
 
         return fixed_schedule_dates
+

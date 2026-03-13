@@ -11,14 +11,11 @@ from typing import Iterator
 
 import numpy as np
 
-from backtesting.core.schedule import Schedule, ScheduleFormat
+from backtesting.core.dates import bound_to_available_dates, coerce_date
+from backtesting.core.types import Schedule, ScheduleFormat
 from backtesting.core.portfolio import Portfolio
-from backtesting.core.util import (
-    bound_to_available_dates,
-    coerce_date,
-    get_historical_data,
-    top_n_grouped_incremental,
-)
+from backtesting.data import get_historical_data
+from backtesting.simulation import top_n_grouped_incremental
 
 _WORKER_PRICE_DATA = None
 _WORKER_DISTRIBUTION_DATA = None

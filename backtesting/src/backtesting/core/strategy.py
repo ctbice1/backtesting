@@ -4,9 +4,9 @@ import heapq
 import pandas as pd
 import numpy as np
 
-from backtesting.core.activity import Activity, Allocate, Distribute, Rebalance
+from backtesting.core.types import Activity, Allocate, Distribute, Rebalance
 from backtesting.core.portfolio import Portfolio
-from backtesting.core.schedule import Schedule, ScheduleFormat
+from backtesting.core.types import Schedule, ScheduleFormat
 
 class Strategy:
     """Base strategy with common allocation/distribution execution plumbing."""

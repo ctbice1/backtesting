@@ -4,14 +4,13 @@ import numpy as np
 
 from backtesting.core.portfolio import Portfolio
 from backtesting.core.simulate import parallel
-from backtesting.core.util import (
+from backtesting.core.config import get_shared_test_config, load_yaml_config
+from backtesting.core.dates import (
     bound_to_available_dates,
     coerce_date,
-    get_historical_data,
-    get_shared_test_config,
-    load_yaml_config,
     slice_history,
 )
+from backtesting.data import get_historical_data
 
 
 def test_strategy(

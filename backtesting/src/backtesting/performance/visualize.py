@@ -7,6 +7,8 @@ from typing import Any
 import pandas as pd
 import plotly.express as px
 
+from backtesting.performance.metrics import print_parameter_ranking_stats
+
 DEFAULT_FIELDS = (
     "amount",
     "total_allocation",
@@ -20,6 +22,7 @@ DEFAULT_FIELDS = (
 
 def _resolve_results_path(path: str) -> str:
     """Validates and normalizes the required results file path."""
+
     def _is_hashed_results_file(candidate_path: str) -> bool:
         """Returns whether a path matches results_<hash>.pkl naming."""
         filename = os.path.basename(candidate_path)
@@ -64,6 +67,11 @@ def _to_plottable(value: Any) -> Any:
     if hasattr(value, "value"):
         return value.value
 
+    # Normalize numpy arrays (e.g. weights) into hashable values for grouping.
+    if hasattr(value, "tolist"):
+        list_value = value.tolist()
+        return tuple(list_value) if isinstance(list_value, list) else list_value
+
     if isinstance(value, (tuple, list)):
         return str(tuple(value))
 
@@ -106,46 +114,6 @@ def _parse_parameters(parameters: list[str] | None, fallback_parameter: str) -> 
     return parsed or [fallback_parameter]
 
 
-def _print_parameter_ranking_stats(results: pd.DataFrame, parameter: str) -> None:
-    """Prints rank statistics for a parameter value using final portfolio value."""
-    if parameter not in results.columns:
-        available = ", ".join(results.columns)
-        print(f'Parameter "{parameter}" not found. Available columns: {available}')
-        return
-    if "amount" not in results.columns:
-        print('Missing "amount" column in simulation results; cannot rank parameters.')
-        return
-
-    stats_df = results[[parameter, "amount", "rank"]].dropna(subset=[parameter, "amount"])
-    if stats_df.empty:
-        print(f'No usable rows found for parameter "{parameter}".')
-        return
-
-    grouped = (
-        stats_df.groupby(parameter, dropna=False)
-        .agg(
-            observations=("amount", "size"),
-            best_final_value=("amount", "max"),
-            avg_final_value=("amount", "mean"),
-            median_final_value=("amount", "median"),
-            worst_final_value=("amount", "min"),
-            std_final_value=("amount", "std"),
-            best_observed_rank=("rank", "min"),
-        )
-        .sort_values(["best_final_value", "avg_final_value"], ascending=False)
-        .reset_index()
-    )
-
-    print(f"\n=== Parameter analysis: {parameter} ===")
-    print(grouped.to_string(index=False, float_format=lambda x: f"{x:,.2f}"))
-
-    best_row = grouped.iloc[0]
-    print(
-        f'\nBest "{parameter}" by max final portfolio value: {best_row[parameter]} '
-        f'(max ${best_row["best_final_value"]:,.2f}, mean ${best_row["avg_final_value"]:,.2f})'
-    )
-
-
 def plot_ranked_results_against_parameter(results: pd.DataFrame, parameter: str) -> None:
     """Visualizes final portfolio value against a simulation parameter."""
     if parameter not in results.columns:
@@ -181,7 +149,7 @@ def plot_ranked_results_against_parameter(results: pd.DataFrame, parameter: str)
 
 def main() -> None:
     """Parses CLI arguments, loads results, and renders analysis output."""
-    parser = argparse.ArgumentParser(description="Visualize simulation results from pickle output.")
+    parser = argparse.ArgumentParser(description="Analyze simulation results from pickle output.")
     parser.add_argument("results_file", help="Path to results_<hash>.pkl file")
     parser.add_argument(
         "-p",
@@ -223,7 +191,7 @@ def main() -> None:
 
     parameters = _parse_parameters(args.parameters, args.parameter)
     for parameter in parameters:
-        _print_parameter_ranking_stats(results, parameter)
+        print_parameter_ranking_stats(results, parameter)
         if not args.stats_only:
             plot_ranked_results_against_parameter(results, parameter)
 

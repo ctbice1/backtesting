@@ -27,6 +27,7 @@ class Activity:
             return self.priority > other.priority
         return self.date > other.date
 
+
 class Distribute(Activity):
     """Dividend/distribution reinvestment activity."""
 
@@ -37,6 +38,7 @@ class Distribute(Activity):
     def __repr__(self) -> str:
         """Returns a readable representation for logs/debug output."""
         return f"Distribution on\t{self.date}"
+
 
 class Allocate(Activity):
     """Capital allocation activity."""
@@ -50,6 +52,7 @@ class Allocate(Activity):
         """Returns a readable representation for logs/debug output."""
         return f"Allocation on\t{self.date}: ${self.amount:,}"
 
+
 class Rebalance(Activity):
     """Portfolio rebalance activity."""
 
@@ -61,3 +64,4 @@ class Rebalance(Activity):
     def __repr__(self) -> str:
         """Returns a readable representation for logs/debug output."""
         return f"Rebalance on\t{self.date}"
+

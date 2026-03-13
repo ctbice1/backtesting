@@ -15,7 +15,7 @@ It supports:
 - `backtesting/__main__.py` - CLI entrypoint for running tests/simulations
 - `backtesting/src/backtesting/core/` - Portfolio engine, scheduling, simulation, utilities
 - `backtesting/src/backtesting/strategies/` - Strategy implementations
-- `backtesting/src/backtesting/visualize/visualize.py` - Simulation result analysis and plotting
+- `backtesting/src/backtesting/performance/visualize.py` - Simulation result analysis and plotting
 
 ## Requirements
 
@@ -150,7 +150,7 @@ test:
 Use the visualization utility with a generated results file:
 
 ```bash
-python -m backtesting.visualize.visualize results_<hash>.pkl
+python -m backtesting.performance.visualize results_<hash>.pkl
 ```
 
 Useful options:
@@ -163,7 +163,7 @@ Useful options:
 Example:
 
 ```bash
-python -m backtesting.visualize.visualize results_abc123def456.pkl --stats-only -P allocation_schedule weights
+python -m backtesting.performance.visualize results_abc123def456.pkl --stats-only -P allocation_schedule weights
 ```
 
 ## Notes

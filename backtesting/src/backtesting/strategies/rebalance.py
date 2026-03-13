@@ -3,12 +3,16 @@ import sys
 
 import numpy as np
 
-from backtesting.core.activity import Rebalance
-from backtesting.core.indicators import SimpleMovingAverage, SimpleMovingStdDev, SimpleMovingVariance
+from backtesting.core.types import Rebalance
+from backtesting.indicators.basic import (
+    SimpleMovingAverage,
+    SimpleMovingStdDev,
+    SimpleMovingVariance,
+)
+from backtesting.data import get_historical_data
 from backtesting.core.portfolio import Portfolio
-from backtesting.core.schedule import Schedule, ScheduleFormat
+from backtesting.core.types import Schedule, ScheduleFormat
 from backtesting.core.strategy import Strategy
-from backtesting.core.util import get_historical_data
 
 class ScheduledRebalance(Strategy):
     '''Basic Rebalance Strategy'''

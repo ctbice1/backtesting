@@ -38,6 +38,7 @@ class SimpleMovingAverage:
         """Returns a readable indicator label."""
         return f"{self.length} day simple moving average"
 
+
 class SimpleMovingStdDev:
     """Rolling sample standard deviation indicator."""
 
@@ -59,7 +60,7 @@ class SimpleMovingStdDev:
 
         # Get remaining N - 1 values where N = length
         for i in range(1, min(self.length - 1, len(prices))):
-            self.history[i] = np.std(prices[:i+1], ddof=1)
+            self.history[i] = np.std(prices[: i + 1], ddof=1)
 
         # Create kernel
         kernel = np.ones(self.length)
@@ -76,7 +77,8 @@ class SimpleMovingStdDev:
         std_dev = np.sqrt(welford_var)
 
         # Add to the historical data set
-        self.history[self.length - 1:] = std_dev
+        self.history[self.length - 1 :] = std_dev
+
 
 class SimpleMovingVariance:
     """Rolling sample variance indicator."""
@@ -99,7 +101,7 @@ class SimpleMovingVariance:
 
         # Get remaining N - 1 values where N = length
         for i in range(1, min(self.length - 1, len(prices))):
-            self.history[i] = np.var(prices[:i+1], ddof=1)
+            self.history[i] = np.var(prices[: i + 1], ddof=1)
 
         # Create kernel
         kernel = np.ones(self.length)
@@ -113,4 +115,4 @@ class SimpleMovingVariance:
         welford_var *= (self.length / (self.length - 1))
 
         # Add to the historical data set
-        self.history[self.length - 1:] = welford_var
+        self.history[self.length - 1 :] = welford_var
