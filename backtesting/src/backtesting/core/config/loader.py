@@ -308,7 +308,54 @@ def get_shared_test_config(config: dict[str, object], test_type: str | None = No
         dates_config.get("end", dates_config.get("stop_date", config.get("stop_date", None))),
     )
 
-    config["track_performance"] = config.get("track_performance", False)
+    performance_config = config.get("performance", {})
+    if performance_config is None:
+        performance_config = {}
+    if not isinstance(performance_config, dict):
+        print("Invalid performance configuration. Expected a mapping/object.")
+        sys.exit(-1)
+
+    benchmark_ticker = performance_config.get("benchmark", config.get("benchmark", None))
+    if isinstance(benchmark_ticker, bool):
+        print("Invalid benchmark ticker. Expected a string ticker or null.")
+        sys.exit(-1)
+    if benchmark_ticker is not None:
+        benchmark_ticker = str(benchmark_ticker).strip()
+        if not benchmark_ticker:
+            benchmark_ticker = None
+
+    risk_free_ticker = performance_config.get(
+        "risk_free_ticker",
+        config.get("risk_free_ticker", "^IRX"),
+    )
+    if isinstance(risk_free_ticker, bool):
+        print("Invalid risk_free_ticker. Expected a string ticker or null.")
+        sys.exit(-1)
+    if risk_free_ticker is not None:
+        risk_free_ticker = str(risk_free_ticker).strip()
+        if not risk_free_ticker:
+            risk_free_ticker = None
+
+    if test_type == "single":
+        if benchmark_ticker is None:
+            print(
+                "Single tests require performance.benchmark (or top-level benchmark) "
+                "to calculate benchmark-relative metrics."
+            )
+            sys.exit(-1)
+        if risk_free_ticker is None:
+            print(
+                "Single tests require performance.risk_free_ticker (or top-level risk_free_ticker) "
+                "to calculate risk-adjusted metrics."
+            )
+            sys.exit(-1)
+
+    config["benchmark_ticker"] = benchmark_ticker
+    config["risk_free_ticker"] = risk_free_ticker
+    if test_type == "single":
+        config["track_performance"] = True
+    else:
+        config["track_performance"] = config.get("track_performance", False)
 
     return {
         "securities": config["securities"],
@@ -327,4 +374,6 @@ def get_shared_test_config(config: dict[str, object], test_type: str | None = No
         "dates": config["dates"],
         "trace": config.get("trace", False),
         "track_performance": config["track_performance"],
+        "benchmark_ticker": config["benchmark_ticker"],
+        "risk_free_ticker": config["risk_free_ticker"],
     }

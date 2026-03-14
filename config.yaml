@@ -11,6 +11,11 @@ test:
         primary: TQQQ
         alternate: QQQ
         dxy_adjusted: false
+        # name: ScheduledRebalance
+        # schedule:
+        #   mode: static
+        #   format: DAYS
+        #   value: 180
       allocation:
         mode: static
         schedule:
@@ -21,7 +26,10 @@ test:
       weights:
         mode: static
       dates:
-        start: "2026-01-30"
+        start: "2021-03-13"
+      performance:
+        benchmark: ^NDX
+        risk_free_ticker: ^IRX
   #     trace: false
   # simulate:
   #   - securities:

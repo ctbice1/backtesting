@@ -86,10 +86,14 @@ Each test item under `single` or `simulate` accepts these blocks:
 - `dates` (optional)
   - `start`: ISO date string (`YYYY-MM-DD`)
   - `end`: ISO date string (`YYYY-MM-DD`)
+- `performance` (optional)
+  - `benchmark`: benchmark ticker/index used for beta, alpha, and Treynor
+  - `risk_free_ticker`: ticker used to estimate risk-free rate (`^IRX` recommended)
+  - Required for `single` tests
 - `trace` (optional)
   - Enables detailed transaction output during execution
 - `track_performance` (optional)
-  - Tracks share history for strategy performance processing
+  - For `single` tests this is always enabled so performance metrics can be reported
 
 ### Schedule Formats
 
@@ -142,8 +146,16 @@ test:
         mode: static
       dates:
         start: "2020-01-01"
+      performance:
+        benchmark: ^NDX
+        risk_free_ticker: ^IRX
       trace: false
 ```
+
+For single tests, performance output includes Sortino, Treynor, alpha, and beta.
+Single-test configs must provide both `performance.benchmark` and
+`performance.risk_free_ticker`. The risk-free ticker is interpreted like `^IRX`
+(close values are yield percentages) and converted to an annualized decimal rate.
 
 ## Visualizing Simulation Results
 
