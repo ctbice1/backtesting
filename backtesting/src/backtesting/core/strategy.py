@@ -20,6 +20,13 @@ class Strategy:
 
         self._start_date = kwargs.get("start_date", None)
 
+        self._allocation_contribution_weights: tuple[float, ...] | None = kwargs.get(
+            "allocation_weights"
+        )
+        self._distribution_contribution_weights: tuple[float, ...] | None = kwargs.get(
+            "distribution_weights"
+        )
+
         self.activity_schedule: list[Activity] = []
         self.allocation_dates: dict = {}
 
@@ -34,7 +41,9 @@ class Strategy:
         return {
             "allocation_schedule": self._allocation_schedule,
             "initial_allocation": self._initial_allocation,
-            "yearly_allocation": self._yearly_allocation
+            "yearly_allocation": self._yearly_allocation,
+            "allocation_weights": self._allocation_contribution_weights,
+            "distribution_weights": self._distribution_contribution_weights,
         }
 
     def _set_allocations(self, price_history_dates: np.ndarray[pd.Timestamp]) -> None:
@@ -101,11 +110,24 @@ class Strategy:
 
         # Add allocation dates and distribution dates
         for date in self.allocation_dates:
-            heapq.heappush(self.activity_schedule, Allocate(date, self.allocation_dates[date]))
+            heapq.heappush(
+                self.activity_schedule,
+                Allocate(
+                    date,
+                    self.allocation_dates[date],
+                    self._allocation_contribution_weights,
+                ),
+            )
 
         if distribution_history_dates is not None:
             for date in pd.to_datetime([date for date in distribution_history_dates if date >= self._start_date]):
-                heapq.heappush(self.activity_schedule, Distribute(date))
+                heapq.heappush(
+                    self.activity_schedule,
+                    Distribute(
+                        date,
+                        self._distribution_contribution_weights,
+                    ),
+                )
 
         # Clear rebalance and allocation date dictionaries
         del self.allocation_dates
@@ -160,6 +182,7 @@ class Strategy:
         self.activity_schedule = sorted(self.activity_schedule)
 
         # Execute activities from pipeline
+        initial = True
         while self.activity_schedule:
 
             activity = heapq.heappop(self.activity_schedule)
@@ -182,14 +205,16 @@ class Strategy:
                     date_string,
                     prices,
                     activity.amount,
-                    details=trace
+                    activity.weights if initial is False else portfolio.weights,
+                    trace=trace,
                 )
+                initial = False
             elif isinstance(activity, Rebalance):
                 portfolio.rebalance(
                     date_string,
                     prices,
                     activity.weights,
-                    details=trace
+                    trace=trace
                 )
             elif isinstance(activity, Distribute):
                 if distribution_history_dates is None or distribution_history is None:
@@ -204,7 +229,8 @@ class Strategy:
                     date_string,
                     prices,
                     distribution_amount,
-                    details=trace
+                    activity.weights,
+                    trace=trace,
                 )
 
             if self.track:

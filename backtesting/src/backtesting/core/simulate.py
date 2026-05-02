@@ -287,12 +287,18 @@ def _build_simulation_cache_key(config: dict, price_dates: np.ndarray) -> str:
                 rebalance_schedule.value,
             ) if rebalance_schedule is not None else None,
         }
+    alloc_w = config.get("allocation_weights")
+    dist_w = config.get("distribution_weights")
     payload = {
         "securities": list(config.get("securities", ())),
+        "synthetic_securities": config.get("synthetic_securities", {}),
+        "synthetic_financing": config.get("synthetic_financing", {}),
         "weights": weights_signature,
         "dates": [str(config["dates"][0]), str(config["dates"][1])],
         "allocation_schedule": allocation_signature,
         "rebalance_schedule": rebalance_signature,
+        "allocation_contribution_weights": list(alloc_w) if alloc_w is not None else None,
+        "distribution_contribution_weights": list(dist_w) if dist_w is not None else None,
         "price_start": str(price_dates[0]) if price_dates.size else None,
         "price_stop": str(price_dates[-1]) if price_dates.size else None,
     }
@@ -414,6 +420,8 @@ def _test_portfolio(config: dict, test_case: tuple) -> tuple:
         "allocation_schedule",
         "start_date",
         "track",
+        "allocation_weights",
+        "distribution_weights",
     }
     for key in reserved_strategy_kwargs:
         strategy_args.pop(key, None)
@@ -426,6 +434,8 @@ def _test_portfolio(config: dict, test_case: tuple) -> tuple:
         allocation_schedule=allocation_schedule,
         start_date=start_date,
         track=config.get("track_performance", False),
+        allocation_weights=config.get("allocation_weights"),
+        distribution_weights=config.get("distribution_weights"),
         **strategy_args,
     )
 
@@ -451,7 +461,11 @@ def parallel(config: dict) -> None:
 
     # Get historical data
     try:
-        price_data, distribution_data = get_historical_data((security[0] for security in config["securities"]))
+        price_data, distribution_data = get_historical_data(
+            (security[0] for security in config["securities"]),
+            synthetic_securities=config.get("synthetic_securities"),
+            financing_config=config.get("synthetic_financing"),
+        )
     except RuntimeError as e:
         print(e)
         sys.exit(-1)

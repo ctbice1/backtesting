@@ -72,6 +72,10 @@ Each test item under `single` or `simulate` accepts these blocks:
 - `securities` (required)
   - List of `{ticker, weight}` entries
   - Weights must sum to `1.0`
+  - Optional synthetic-return fields per security:
+    - `daily_return_multiplier`: float leverage factor (for example `2.0` or `3.0`)
+    - `underlying_ticker`: source ticker used to build synthetic prices (defaults to `ticker`)
+    - `expense_ratio`: annual expense ratio as a decimal float (defaults to `0.0`)
 - `strategy` (required)
   - `name`: strategy class name
   - Additional strategy-specific args
@@ -109,6 +113,51 @@ Used in:
 - `allocation.schedule` (static allocation mode)
 - `strategy.schedule` (when strategy supports schedule-based behavior)
 
+### Synthetic Leveraged Securities
+
+If `daily_return_multiplier` is provided for a security, the engine generates synthetic
+open/close prices from the selected underlying ticker before running the backtest.
+
+Synthetic price construction:
+
+- Daily expense drag:
+  - `daily_expense_rate = expense_ratio / 252`
+- Close-to-close move:
+  - `synthetic_close = previous_synthetic_close * (1 + underlying_daily_return * multiplier - daily_expense_rate)`
+- Overnight open move:
+  - `synthetic_open = previous_synthetic_close * (1 + underlying_overnight_return * multiplier)`
+- Daily financing drag for borrowed exposure (see below):
+  - `effective_borrowing_size = max(daily_return_multiplier - 1.0, 0.0)`
+  - `daily_financing_rate = annual_funding_rate / 365`
+  - `financing_drag = synthetic_open * daily_financing_rate * effective_borrowing_size`
+
+The synthetic close series is then used by the current portfolio execution logic.
+
+### Synthetic Financing Costs
+
+Leveraged synthetic securities (those with `daily_return_multiplier > 1.0`) imply
+borrowed exposure equal to `daily_return_multiplier - 1` per dollar of NAV. The
+engine charges a daily borrowing cost using a configurable overnight funding rate
+sourced from FRED. By default it uses the daily Effective Federal Funds Rate
+(`DFF`), which provides daily history back to 1954.
+
+Annual percent rates from FRED are converted to a daily decimal via
+`annual_rate_percent / 100 / 365`, then multiplied by the synthetic position's
+borrowed size and current NAV to produce the dollar drag that is subtracted from
+each synthetic close.
+
+Configuration is optional and defaults are sensible. To override or disable:
+
+```yaml
+financing:
+  enabled: true        # set to false to skip financing drag
+  rate_source: fred    # only "fred" is supported today
+  series_id: DFF       # any daily FRED series id (e.g. SOFR for post-2018 only)
+```
+
+Cached FRED data is stored under `tickers/fred/<SERIES_ID>.pkl`. Delete that file
+to refresh the rate history on the next run.
+
 ## Strategy Names
 
 Available strategies in `backtesting/src/backtesting/strategies/rebalance.py`:
@@ -120,6 +169,33 @@ Available strategies in `backtesting/src/backtesting/strategies/rebalance.py`:
 - `VolatilityAdjustedSMARebalance`
 
 Strategy-specific fields (such as `target`, `primary`, `alternate`, SMA lengths, etc.) go under the `strategy` block.
+
+### Contribution weights vs rebalance weights
+
+`securities[].weight` is the default portfolio mix and the target used on scheduled rebalances. Optional overrides control how **new** cash is invested (initial and periodic allocations) and how **distributions** are reinvested:
+
+- `allocation.weights`: map each portfolio ticker to a weight (must sum to `1.0`). If omitted, contributions follow `securities[].weight`.
+- `distribution.weights`: same shape; if omitted, distributions use `allocation.weights` when that is set, otherwise `securities[].weight`.
+
+Example: put new capital and dividends 100% into `TQQQ` while rebalancing to 90% `TQQQ` / 10% `QQQI`:
+
+```yaml
+securities:
+  - ticker: TQQQ
+    weight: 0.9
+  - ticker: QQQI
+    weight: 0.1
+allocation:
+  initial: 10000
+  yearly: 10000
+  weights:
+    TQQQ: 1.0
+    QQQI: 0.0
+distribution:
+  weights:
+    TQQQ: 1.0
+    QQQI: 0.0
+```
 
 ## Example `simulate` Configuration
 
@@ -152,7 +228,7 @@ test:
       trace: false
 ```
 
-For single tests, performance output includes Sortino, Treynor, alpha, and beta.
+For single tests, performance output includes Sharpe, Sortino, Treynor, alpha, and beta.
 Single-test configs must provide both `performance.benchmark` and
 `performance.risk_free_ticker`. The risk-free ticker is interpreted like `^IRX`
 (close values are yield percentages) and converted to an annualized decimal rate.

@@ -20,64 +20,47 @@ class Portfolio:
         return np.sum(self.current_shares * price_data)
 
     def allocate(
-        self, date_string: str, price_data: np.ndarray, amount: float, details: bool = False
+        self,
+        date_string: str,
+        price_data: np.ndarray,
+        amount: float,
+        weights: tuple[float, ...],
+        trace: bool = False,
     ) -> None:
-        """Performs an allocation to all tickers on a specific date."""
+        """Performs an allocation to all tickers on a specific date.
+
+        If ``contribution_weights`` is set, that mix is used for this contribution only
+        (rebalance target weights on the portfolio are unchanged).
+        """
+
+        self.unallocated_capital += amount
 
         # Don't allocate anything less than $1
         if amount < 1.0:
-            self.unallocated_capital += amount
             return
 
-        # Get available capital
-        available_capital = amount + self.unallocated_capital
-
-        # Add the new amount to the current value of the portfolio
-        current_portfolio_value = np.sum(self.current_shares * price_data).round(decimals=2)
-        new_portfolio_value = current_portfolio_value + available_capital
-
-        # Get ticker value deltas
-        new_ticker_values = (self.weights * new_portfolio_value).round(decimals=2)
-        current_ticker_values = (self.weights * current_portfolio_value).round(decimals=2)
-        ticker_value_deltas = new_ticker_values - current_ticker_values
-
-        # Filter any value deltas under $1
-        filtered_ticker_value_deltas = np.where(ticker_value_deltas >= 1.0, ticker_value_deltas, 0.0)
-
-        # Check if an allocation is needed
-        required_capital = np.sum(filtered_ticker_value_deltas)
-        if required_capital == 0.0:
-            return
-
-        # Remove any excess required capital
-        if required_capital > available_capital:
-            excess_amount = (required_capital - available_capital)
-            weights = filtered_ticker_value_deltas / required_capital
-            excess_amounts = (excess_amount * weights).round(decimals=2)
-            filtered_ticker_value_deltas = filtered_ticker_value_deltas - excess_amounts
+        # Get target ticker values
+        ticker_values = (np.array(weights) * self.unallocated_capital).round(decimals=2)
 
         # Convert values to shares
-        ticker_share_deltas = filtered_ticker_value_deltas / price_data
-        ticker_share_deltas = ticker_share_deltas.round(decimals=3)
-
-        # Subtract the actual amount allocated from the allocation amount
-        available_capital -= np.sum(filtered_ticker_value_deltas)
-
-        # Add the remaining amount to unallocated capital
-        self.unallocated_capital = available_capital
+        ticker_share_deltas = ticker_values / price_data
+        ticker_share_deltas = ticker_share_deltas.round(decimals=4)
 
         # Add share deltas (subtract if negative)
         self.current_shares += ticker_share_deltas
 
-        if details:
-            print(f"Allocated ${np.sum(filtered_ticker_value_deltas):,.2f} -- " + ", ".join(f"${filtered_ticker_value_deltas[i]:,.2f} to {self.tickers[i]}" for i in range(len(self.tickers))) + f" on {date_string}")
+        # Subtract the actual amount allocated from the unallocated capital
+        self.unallocated_capital = max(0.0, (self.unallocated_capital - np.sum(ticker_share_deltas * price_data).round(decimals=2)))
+
+        if trace:
+            print(f"Allocated ${np.sum(ticker_values):,.2f} -- " + ", ".join(f"${ticker_values[i]:,.2f} to {self.tickers[i]}" for i in range(len(self.tickers))) + f" on {date_string}")
 
     def rebalance(
         self,
         date_string: str,
         price_data: np.ndarray,
         target_weights: tuple[float, ...] | None = None,
-        details: bool = False,
+        trace: bool = False,
     ) -> None:
         """Performs a rebalance on all tickers in a portfolio."""
 
@@ -128,5 +111,5 @@ class Portfolio:
         # Add share deltas (subtract if negative)
         self.current_shares += ticker_share_deltas
 
-        if details:
+        if trace:
             print("Rebalanced " + ", ".join(f"{self.tickers[i]}: {'+' if filtered_ticker_value_deltas[i] > 0.0 else '-'}${abs(filtered_ticker_value_deltas[i]):,.2f}" for i in range(len(self.tickers))) + f" on {date_string}")

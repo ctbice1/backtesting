@@ -27,6 +27,8 @@ def test_strategy(
     test_parameters: tuple,
     trace: bool = False,
     track: bool = False,
+    allocation_weights: tuple[float, ...] | None = None,
+    distribution_weights: tuple[float, ...] | None = None,
 ):
     """Tests a strategy with the provided parameters and data."""
     strategy_cls, strategy_args, securities = strategy_config
@@ -41,6 +43,8 @@ def test_strategy(
         yearly_allocation=yearly_allocation,
         start_date=start_date,
         track=track,
+        allocation_weights=allocation_weights,
+        distribution_weights=distribution_weights,
         **strategy_args,
     )
 
@@ -51,7 +55,11 @@ def test_strategy(
 def single_test(config: dict):
     """Runs a single configured test."""
     try:
-        historical_data = get_historical_data((security[0] for security in config["securities"]))
+        historical_data = get_historical_data(
+            (security[0] for security in config["securities"]),
+            synthetic_securities=config.get("synthetic_securities"),
+            financing_config=config.get("synthetic_financing"),
+        )
     except RuntimeError as error:
         print(error)
         sys.exit(-1)
@@ -133,6 +141,8 @@ def single_test(config: dict):
         test_parameters,
         trace=config["trace"],
         track=config["track_performance"],
+        allocation_weights=config.get("allocation_weights"),
+        distribution_weights=config.get("distribution_weights"),
     )
 
     final_prices = price_history[(price_history_dates == stop_date)][0]
@@ -193,6 +203,7 @@ def single_test(config: dict):
     print(f"Total return: {_fmt_metric(summary['total_return'], percent=True)}")
     print(f"Benchmark: {benchmark_ticker}")
     print(f"Risk-free source: {risk_free_ticker} ({_fmt_metric(risk_free_rate, percent=True)})")
+    print(f"Sharpe ratio: {_fmt_metric(summary['sharpe_ratio'])}")
     print(f"Sortino ratio: {_fmt_metric(summary['sortino_ratio'])}")
     print(f"Treynor ratio: {_fmt_metric(summary['treynor_ratio'])}")
     print(f"Alpha: {_fmt_metric(summary['alpha'], percent=True)}")

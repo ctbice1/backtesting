@@ -31,9 +31,10 @@ class Activity:
 class Distribute(Activity):
     """Dividend/distribution reinvestment activity."""
 
-    def __init__(self, date: pd.Timestamp) -> None:
+    def __init__(self, date: pd.Timestamp, weights: tuple | None = None) -> None:
         """Creates a distribution activity for the given date."""
         super().__init__(2, date)
+        self.weights = weights
 
     def __repr__(self) -> str:
         """Returns a readable representation for logs/debug output."""
@@ -43,10 +44,11 @@ class Distribute(Activity):
 class Allocate(Activity):
     """Capital allocation activity."""
 
-    def __init__(self, date: pd.Timestamp, amount: float) -> None:
+    def __init__(self, date: pd.Timestamp, amount: float, weights: tuple | None = None) -> None:
         """Creates an allocation activity with a target amount."""
         super().__init__(3, date)
         self.amount = amount
+        self.weights = weights
 
     def __repr__(self) -> str:
         """Returns a readable representation for logs/debug output."""

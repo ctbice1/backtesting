@@ -78,6 +78,27 @@ def beta(
     return float(covariance / benchmark_variance)
 
 
+def sharpe_ratio(
+    portfolio_returns: Sequence[float] | np.ndarray | pd.Series,
+    risk_free_rate: float = 0.0,
+    periods_per_year: int = 252,
+) -> float:
+    """Calculates annualized Sharpe ratio from periodic returns."""
+    returns = _as_series(portfolio_returns)
+    if len(returns) < 2:
+        return float("nan")
+
+    period_risk_free = risk_free_rate / periods_per_year
+    excess_returns = returns - period_risk_free
+    excess_volatility = excess_returns.std(ddof=1)
+    if excess_volatility == 0 or np.isnan(excess_volatility):
+        return float("nan")
+
+    annualized_excess_return = excess_returns.mean() * periods_per_year
+    annualized_excess_volatility = excess_volatility * np.sqrt(periods_per_year)
+    return float(annualized_excess_return / annualized_excess_volatility)
+
+
 def sortino_ratio(
     portfolio_returns: Sequence[float] | np.ndarray | pd.Series,
     risk_free_rate: float = 0.0,
@@ -182,6 +203,11 @@ def portfolio_performance_summary(
     benchmark_returns = _returns_from_values(benchmark_values)
 
     metric_beta = beta(portfolio_returns, benchmark_returns)
+    metric_sharpe = sharpe_ratio(
+        portfolio_returns,
+        risk_free_rate=risk_free_rate,
+        periods_per_year=periods_per_year,
+    )
     metric_sortino = sortino_ratio(
         portfolio_returns,
         risk_free_rate=risk_free_rate,
@@ -206,6 +232,7 @@ def portfolio_performance_summary(
         "distributions": distributions,
         "net_profit": net_profit,
         "total_return": float(total_return),
+        "sharpe_ratio": metric_sharpe,
         "sortino_ratio": metric_sortino,
         "treynor_ratio": metric_treynor,
         "alpha": metric_alpha,

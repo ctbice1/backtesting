@@ -60,6 +60,54 @@ def _build_schedule(schedule_config: dict, context: str) -> Schedule:
         sys.exit(-1)
 
 
+def _parse_contribution_weights(
+    weights_obj: object,
+    securities: tuple[tuple[str, float], ...],
+    context: str,
+) -> tuple[float, ...]:
+    """Parses a ticker -> weight mapping into a tuple aligned with ``securities`` order."""
+    if weights_obj is None:
+        print(f"Missing weights mapping for {context}.")
+        sys.exit(-1)
+    if not isinstance(weights_obj, dict):
+        print(f"Invalid {context}: expected a mapping of ticker -> weight, got {type(weights_obj).__name__}.")
+        sys.exit(-1)
+
+    tickers = [s[0] for s in securities]
+    ticker_set = set(tickers)
+    unknown = set(weights_obj.keys()) - ticker_set
+    if unknown:
+        print(f"Invalid {context}: unknown ticker(s): {sorted(unknown)}.")
+        sys.exit(-1)
+
+    values: list[float] = []
+    for ticker in tickers:
+        if ticker not in weights_obj:
+            print(f"Invalid {context}: missing weight for ticker {ticker}.")
+            sys.exit(-1)
+        w = weights_obj[ticker]
+        if isinstance(w, bool):
+            print(f"Invalid {context} weight for {ticker}: {w}. Must be numeric.")
+            sys.exit(-1)
+        try:
+            wf = float(w)
+        except (TypeError, ValueError):
+            print(f"Invalid {context} weight for {ticker}: {w}. Must be numeric.")
+            sys.exit(-1)
+        values.append(wf)
+
+    try:
+        total = float(sum(values))
+    except (TypeError, ValueError):
+        print(f"Invalid {context}: weights must be numeric.")
+        sys.exit(-1)
+    if not np.isclose(total, 1.0, atol=1e-6):
+        print(f"Invalid {context}: weights must sum to 1.0 (100%), got {total}.")
+        sys.exit(-1)
+
+    return tuple(round(v, 4) for v in values)
+
+
 def get_shared_test_config(config: dict[str, object], test_type: str | None = None) -> dict[str, object]:
     """Loads shared test configuration parameters."""
     securities = config.get("securities", [])
@@ -67,6 +115,7 @@ def get_shared_test_config(config: dict[str, object], test_type: str | None = No
         print("Please provide securities to test.")
         sys.exit(-1)
 
+    synthetic_securities: dict[str, dict[str, object]] = {}
     for security in securities:
         if "ticker" not in security:
             print(f'Security: {security} must have a ticker symbol specified as: ticker = "symbol".')
@@ -78,6 +127,62 @@ def get_shared_test_config(config: dict[str, object], test_type: str | None = No
             print(f"Invalid weight for {security['ticker']}: {security['weight']}. Must be numeric.")
             sys.exit(-1)
 
+        ticker = str(security["ticker"]).strip()
+        if not ticker:
+            print(f"Invalid security ticker: {security['ticker']}. Must be a non-empty string.")
+            sys.exit(-1)
+
+        if "daily_return_multiplier" not in security:
+            continue
+        daily_return_multiplier = security["daily_return_multiplier"]
+        if isinstance(daily_return_multiplier, bool):
+            print(
+                f"Invalid daily_return_multiplier for {ticker}: {daily_return_multiplier}. Must be numeric."
+            )
+            sys.exit(-1)
+        try:
+            daily_return_multiplier = float(daily_return_multiplier)
+        except (TypeError, ValueError):
+            print(
+                f"Invalid daily_return_multiplier for {ticker}: {daily_return_multiplier}. Must be numeric."
+            )
+            sys.exit(-1)
+        if daily_return_multiplier <= 0:
+            print(
+                f"Invalid daily_return_multiplier for {ticker}: {daily_return_multiplier}. Must be > 0."
+            )
+            sys.exit(-1)
+
+        underlying_ticker = security.get("underlying_ticker", ticker)
+        if isinstance(underlying_ticker, bool):
+            print(
+                f"Invalid underlying_ticker for {ticker}: {underlying_ticker}. Must be a non-empty string."
+            )
+            sys.exit(-1)
+        underlying_ticker = str(underlying_ticker).strip()
+        if not underlying_ticker:
+            print(f"Invalid underlying_ticker for {ticker}. Must be a non-empty string.")
+            sys.exit(-1)
+
+        expense_ratio = security.get("expense_ratio", 0.0)
+        if isinstance(expense_ratio, bool):
+            print(f"Invalid expense_ratio for {ticker}: {expense_ratio}. Must be numeric.")
+            sys.exit(-1)
+        try:
+            expense_ratio = float(expense_ratio)
+        except (TypeError, ValueError):
+            print(f"Invalid expense_ratio for {ticker}: {expense_ratio}. Must be numeric.")
+            sys.exit(-1)
+        if expense_ratio < 0.0:
+            print(f"Invalid expense_ratio for {ticker}: {expense_ratio}. Must be >= 0.")
+            sys.exit(-1)
+
+        synthetic_securities[ticker] = {
+            "underlying_ticker": underlying_ticker,
+            "daily_return_multiplier": daily_return_multiplier,
+            "expense_ratio": expense_ratio,
+        }
+
     try:
         total_weight = float(sum(float(security["weight"]) for security in config["securities"]))
     except (TypeError, ValueError):
@@ -87,7 +192,44 @@ def get_shared_test_config(config: dict[str, object], test_type: str | None = No
         print("Invalid securities weights. Must sum to 1.0 (100%).")
         sys.exit(-1)
 
-    config["securities"] = tuple((security["ticker"], float(security["weight"])) for security in securities)
+    config["securities"] = tuple((str(security["ticker"]).strip(), float(security["weight"])) for security in securities)
+    config["synthetic_securities"] = synthetic_securities
+
+    financing_config_raw = config.get("financing", {})
+    if financing_config_raw is None:
+        financing_config_raw = {}
+    if not isinstance(financing_config_raw, dict):
+        print("Invalid financing configuration. Expected a mapping/object.")
+        sys.exit(-1)
+
+    financing_enabled = financing_config_raw.get("enabled", True)
+    if not isinstance(financing_enabled, bool):
+        print(f"Invalid financing.enabled: {financing_enabled}. Must be true or false.")
+        sys.exit(-1)
+
+    financing_rate_source = financing_config_raw.get("rate_source", "fred")
+    if isinstance(financing_rate_source, bool):
+        print(f"Invalid financing.rate_source: {financing_rate_source}. Must be a string.")
+        sys.exit(-1)
+    financing_rate_source = str(financing_rate_source).strip().lower()
+    if financing_rate_source not in ("fred",):
+        print(f"Invalid financing.rate_source: {financing_rate_source}. Supported sources: fred.")
+        sys.exit(-1)
+
+    financing_series_id = financing_config_raw.get("series_id", "DFF")
+    if isinstance(financing_series_id, bool):
+        print(f"Invalid financing.series_id: {financing_series_id}. Must be a non-empty string.")
+        sys.exit(-1)
+    financing_series_id = str(financing_series_id).strip()
+    if not financing_series_id:
+        print("Invalid financing.series_id. Must be a non-empty string.")
+        sys.exit(-1)
+
+    config["synthetic_financing"] = {
+        "enabled": financing_enabled,
+        "rate_source": financing_rate_source,
+        "series_id": financing_series_id,
+    }
 
     weights = config.get("weights", {})
     if weights is None:
@@ -297,6 +439,26 @@ def get_shared_test_config(config: dict[str, object], test_type: str | None = No
         config["allocation_schedule"] = None
         config["allocation_increment"] = increment
 
+    allocation_weights: tuple[float, ...] | None = None
+    alloc_weights_raw = allocation.get("weights")
+    if alloc_weights_raw is not None:
+        allocation_weights = _parse_contribution_weights(
+            alloc_weights_raw, config["securities"], "allocation.weights"
+        )
+
+    distribution_block = config.get("distribution")
+    if distribution_block is not None and not isinstance(distribution_block, dict):
+        print("Invalid distribution configuration. Expected a mapping/object or omit the key.")
+        sys.exit(-1)
+
+    distribution_weights: tuple[float, ...] | None = allocation_weights
+    if isinstance(distribution_block, dict):
+        dist_weights_raw = distribution_block.get("weights")
+        if dist_weights_raw is not None:
+            distribution_weights = _parse_contribution_weights(
+                dist_weights_raw, config["securities"], "distribution.weights"
+            )
+
     dates_config = config.get("dates", {})
     if dates_config is None:
         dates_config = {}
@@ -359,6 +521,8 @@ def get_shared_test_config(config: dict[str, object], test_type: str | None = No
 
     return {
         "securities": config["securities"],
+        "synthetic_securities": config["synthetic_securities"],
+        "synthetic_financing": config["synthetic_financing"],
         "strategy": config["strategy"],
         "strategy_args": config["strategy_args"],
         "allocation_schedule": config["allocation_schedule"],
@@ -376,4 +540,6 @@ def get_shared_test_config(config: dict[str, object], test_type: str | None = No
         "track_performance": config["track_performance"],
         "benchmark_ticker": config["benchmark_ticker"],
         "risk_free_ticker": config["risk_free_ticker"],
+        "allocation_weights": allocation_weights,
+        "distribution_weights": distribution_weights,
     }
