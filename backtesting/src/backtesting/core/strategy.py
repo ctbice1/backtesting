@@ -225,6 +225,7 @@ class Strategy:
                 distribution_amounts = distribution_history[distribution_date_index][0]
                 distribution_amount = np.sum(portfolio.current_shares * distribution_amounts)
                 portfolio.total_distribution += distribution_amount
+                portfolio.record_distribution(activity.date, distribution_amount)
                 portfolio.allocate(
                     date_string,
                     prices,

@@ -10,6 +10,34 @@ from backtesting.core.portfolio import Portfolio
 from backtesting.performance.metrics import portfolio_value_history
 
 
+def trailing_twelve_month_yield(
+    distribution_history: Mapping[Any, float] | None,
+    final_balance: float,
+    end_date: Any | None = None,
+) -> float:
+    """Calculates TTM yield as last-12-month distributions divided by portfolio value."""
+    if final_balance <= 0 or np.isnan(final_balance):
+        return float("nan")
+    if not distribution_history:
+        return 0.0
+
+    distributions = pd.Series(distribution_history, dtype=float).dropna()
+    if distributions.empty:
+        return 0.0
+
+    distributions.index = pd.to_datetime(distributions.index)
+    if end_date is None:
+        end_timestamp = distributions.index.max()
+    else:
+        end_timestamp = pd.to_datetime(end_date)
+
+    window_start = end_timestamp - pd.DateOffset(months=12)
+    ttm_distributions = distributions[
+        (distributions.index >= window_start) & (distributions.index <= end_timestamp)
+    ].sum()
+    return float(ttm_distributions / final_balance)
+
+
 def portfolio_values_from_share_history(
     share_history: Mapping[Any, np.ndarray],
     price_history: np.ndarray,
@@ -38,6 +66,39 @@ def _returns_from_values(values: Sequence[float] | np.ndarray | pd.Series | None
         return pd.Series(dtype=float)
     returns = series.pct_change().replace([np.inf, -np.inf], np.nan).dropna()
     return returns.astype(float)
+
+
+def _elapsed_years(values: pd.Series, periods_per_year: int) -> float:
+    """Returns elapsed years from a value series index or observation count."""
+    if isinstance(values.index, pd.DatetimeIndex):
+        elapsed_days = (values.index[-1] - values.index[0]).days
+        if elapsed_days > 0:
+            return elapsed_days / 365.25
+
+    if periods_per_year <= 0:
+        return float("nan")
+    return (len(values) - 1) / periods_per_year
+
+
+def compound_annual_growth_rate(
+    values: Sequence[float] | np.ndarray | pd.Series | None,
+    periods_per_year: int = 252,
+) -> float:
+    """Calculates CAGR from the first and last values in a portfolio value history."""
+    series = _as_series(values)
+    if len(series) < 2:
+        return float("nan")
+
+    start_value = float(series.iloc[0])
+    end_value = float(series.iloc[-1])
+    if start_value <= 0 or end_value <= 0:
+        return float("nan")
+
+    years = _elapsed_years(series, periods_per_year)
+    if years <= 0 or np.isnan(years):
+        return float("nan")
+
+    return float((end_value / start_value) ** (1 / years) - 1)
 
 
 def _aligned_series(
@@ -183,6 +244,7 @@ def portfolio_performance_summary(
     portfolio_values: Sequence[float] | np.ndarray | pd.Series | None = None,
     benchmark_values: Sequence[float] | np.ndarray | pd.Series | None = None,
     risk_free_rate: float = 0.0,
+    end_date: Any | None = None,
     periods_per_year: int = 252,
 ) -> dict[str, float]:
     """
@@ -196,12 +258,18 @@ def portfolio_performance_summary(
     final_balance = float(portfolio.current_value(final_prices))
     net_new_capital = float(portfolio.total_new_capital)
     distributions = float(portfolio.total_distribution)
+    metric_ttm_yield = trailing_twelve_month_yield(
+        portfolio.distribution_history,
+        final_balance,
+        end_date=end_date,
+    )
     net_profit = final_balance - net_new_capital
     total_return = (net_profit / net_new_capital) if net_new_capital > 0 else float("nan")
 
     portfolio_returns = _returns_from_values(portfolio_values)
     benchmark_returns = _returns_from_values(benchmark_values)
 
+    metric_cagr = compound_annual_growth_rate(portfolio_values, periods_per_year=periods_per_year)
     metric_beta = beta(portfolio_returns, benchmark_returns)
     metric_sharpe = sharpe_ratio(
         portfolio_returns,
@@ -232,6 +300,8 @@ def portfolio_performance_summary(
         "distributions": distributions,
         "net_profit": net_profit,
         "total_return": float(total_return),
+        "ttm_yield": metric_ttm_yield,
+        "cagr": metric_cagr,
         "sharpe_ratio": metric_sharpe,
         "sortino_ratio": metric_sortino,
         "treynor_ratio": metric_treynor,

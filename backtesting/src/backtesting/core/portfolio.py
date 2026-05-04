@@ -13,11 +13,16 @@ class Portfolio:
         self.track = track
         self.total_new_capital = 0.0
         self.total_distribution = 0.0
+        self.distribution_history = {}
         self.unallocated_capital = 0.0
 
     def current_value(self, price_data: np.ndarray) -> float:
         """Returns the current total market value of all holdings."""
         return np.sum(self.current_shares * price_data)
+
+    def record_distribution(self, date: object, amount: float) -> None:
+        """Records portfolio-level distributions paid on a specific date."""
+        self.distribution_history[date] = self.distribution_history.get(date, 0.0) + float(amount)
 
     def allocate(
         self,
@@ -33,6 +38,11 @@ class Portfolio:
         (rebalance target weights on the portfolio are unchanged).
         """
 
+        # Check if weights were provided
+        if weights is None:
+            weights = self.weights
+
+        # Account for new capital
         self.unallocated_capital += amount
 
         # Don't allocate anything less than $1
@@ -59,14 +69,14 @@ class Portfolio:
         self,
         date_string: str,
         price_data: np.ndarray,
-        target_weights: tuple[float, ...] | None = None,
+        weights: tuple[float, ...] | None = None,
         trace: bool = False,
     ) -> None:
         """Performs a rebalance on all tickers in a portfolio."""
 
-        # Use custom weights if provided
-        if target_weights is not None:
-            self.weights = target_weights
+        # Use existing weights if not provided
+        if weights is None:
+            weights = self.weights
 
         # Get the current value of the portfolio
         current_portfolio_value = np.sum(self.current_shares * price_data).round(decimals=2)
@@ -75,7 +85,7 @@ class Portfolio:
         current_ticker_values = self.current_shares * price_data
 
         # Get target ticker values
-        target_ticker_values = self.weights * current_portfolio_value
+        target_ticker_values = weights * current_portfolio_value
 
         # Remove any excess required capital
         target_portfolio_value = np.sum(target_ticker_values)

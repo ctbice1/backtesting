@@ -180,6 +180,7 @@ def single_test(config: dict):
         portfolio_values=portfolio_values,
         benchmark_values=benchmark_values,
         risk_free_rate=risk_free_rate,
+        end_date=stop_date,
     )
 
     def _fmt_metric(value: float, percent: bool = False) -> str:
@@ -199,8 +200,10 @@ def single_test(config: dict):
     print(f"Final balance: ${summary['final_balance']:,.2f}")
     print(f"Net new capital: ${summary['net_new_capital']:,.2f}")
     print(f"Distributions: ${summary['distributions']:,.2f}")
+    print(f"TTM portfolio yield: {_fmt_metric(summary['ttm_yield'], percent=True)}")
     print(f"Net profit: ${summary['net_profit']:,.2f}")
     print(f"Total return: {_fmt_metric(summary['total_return'], percent=True)}")
+    print(f"CAGR: {_fmt_metric(summary['cagr'], percent=True)}")
     print(f"Benchmark: {benchmark_ticker}")
     print(f"Risk-free source: {risk_free_ticker} ({_fmt_metric(risk_free_rate, percent=True)})")
     print(f"Sharpe ratio: {_fmt_metric(summary['sharpe_ratio'])}")

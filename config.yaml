@@ -1,11 +1,21 @@
 test:
   single:
     - securities:
-        - ticker: TQQQ
-          underlying_ticker: ^NDX
-          daily_return_multiplier: 3
-          expense_ratio: 0.0082
-          weight: 1.0
+        - ticker: UTES
+          # underlying_ticker: ^NDX
+          # daily_return_multiplier: 3.0
+          # expense_ratio: 0.0082
+          weight: 0.34
+        - ticker: MLPX
+          weight: 0.33
+        - ticker: SCHD
+          weight: 0.33
+        # - ticker: BTC-USD
+        #   weight: 0.025
+        # - ticker: DBP
+        #   weight: 0.025
+        # - ticker: GPIQ
+        #   weight: 0.025
       strategy:
         # name: SimpleMovingAverageRebalance
         # target: ^NDX
@@ -16,19 +26,24 @@ test:
         schedule:
           mode: static
           format: DAYS
-          value: 0
+          value: 60
       allocation:
         mode: static
         schedule:
           format: DAYS
           value: 7
         initial: 10000
-        yearly: 5000
+        yearly: 1000
         weights:
-          TQQQ: 1.0
+          # FPEI: 1.0
+          # PFFA: 0.0
+          # MLPX: 0.0
+          # BTC-USD: 0.0
+          # DBP: 0.0
+          # GPIQ: 0.0
       dates:
-        start: "1986-05-01"
-        #end: "2002-10-09"
+        start: "2015-09-24"
+        #end: "2023-09-24"
       performance:
         benchmark: ^NDX
         risk_free_ticker: ^IRX

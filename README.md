@@ -228,7 +228,7 @@ test:
       trace: false
 ```
 
-For single tests, performance output includes Sharpe, Sortino, Treynor, alpha, and beta.
+For single tests, performance output includes CAGR, Sharpe, Sortino, Treynor, alpha, and beta.
 Single-test configs must provide both `performance.benchmark` and
 `performance.risk_free_ticker`. The risk-free ticker is interpreted like `^IRX`
 (close values are yield percentages) and converted to an annualized decimal rate.
