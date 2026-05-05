@@ -74,6 +74,7 @@ def _elapsed_years(values: pd.Series, periods_per_year: int) -> float:
         elapsed_days = (values.index[-1] - values.index[0]).days
         if elapsed_days > 0:
             return elapsed_days / 365.25
+        return float("nan")
 
     if periods_per_year <= 0:
         return float("nan")

@@ -41,6 +41,17 @@ class PortfolioMetricTests(unittest.TestCase):
 
         self.assertTrue(np.isnan(cagr))
 
+    def test_compound_annual_growth_rate_requires_elapsed_calendar_time(self) -> None:
+        """Dated values with no elapsed calendar time cannot be annualized."""
+        values = pd.Series(
+            [100.0, 110.0],
+            index=pd.DatetimeIndex(["2020-01-01", "2020-01-01"]),
+        )
+
+        cagr = compound_annual_growth_rate(values)
+
+        self.assertTrue(np.isnan(cagr))
+
     def test_portfolio_performance_summary_includes_cagr(self) -> None:
         """The top-level portfolio summary exposes CAGR alongside total return."""
         portfolio = Portfolio(("SPY",), (1.0,))

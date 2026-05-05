@@ -58,7 +58,6 @@ class SimpleMovingAverageRebalance(Strategy):
     def __init__(self, *args: object, **kwargs: object) -> None:
         """Initializes SMA threshold rebalance parameters."""
         super().__init__(**kwargs)
-        self.dxy_adjusted = kwargs.get("dxy_adjusted", False)
         self.target = kwargs.get("target", None)
         length = kwargs.get("length", 200)
         if isinstance(length, bool):
@@ -113,8 +112,9 @@ class SimpleMovingAverageRebalance(Strategy):
             # Restrict history to [start_date, stop_date]
             stop_date = indices[0][-1]
             start_date = indices[0][0]
-            target_price_data = target_price_data[(target_price_dates <= stop_date)]
-            target_price_dates = target_price_dates[(target_price_dates <= stop_date)]
+            bounds_mask = (target_price_dates >= start_date) & (target_price_dates <= stop_date)
+            target_price_data = target_price_data[bounds_mask]
+            target_price_dates = target_price_dates[bounds_mask]
 
         except RuntimeError as e:
             print(e)
@@ -123,14 +123,10 @@ class SimpleMovingAverageRebalance(Strategy):
         # Get SMA history for target
         target_sma = SimpleMovingAverage(self.length, target_price_data).history
 
-        bounds_mask = target_price_dates >= start_date
-        target_price_data = target_price_data[bounds_mask]
-        target_sma = target_sma[bounds_mask]
-        target_price_dates = target_price_dates[bounds_mask]
+        first_rebalance_idx = int(np.searchsorted(target_price_dates, start_date, side="left"))
 
         # Default to portfolio weights
         weights = portfolio.weights
-        trace = True
 
         # Use an alternating max-weighting scheme if a primary and alternate were provided
         if self.primary:
@@ -156,7 +152,7 @@ class SimpleMovingAverageRebalance(Strategy):
 
                 # Move to alternate on cross below; return to primary only after the cooldown.
                 last_rebalance_date = None
-                for i in range(1, len(target_price_dates)):
+                for i in range(max(first_rebalance_idx, 1), len(target_price_dates)):
                     previous_difference = target_price_data[i - 1] - target_sma[i - 1]
                     current_difference = target_price_data[i] - target_sma[i]
                     date = target_price_dates[i]
@@ -176,13 +172,13 @@ class SimpleMovingAverageRebalance(Strategy):
                         heapq.heappush(self.activity_schedule, Rebalance(date, weights))
                         last_rebalance_date = date
                         if trace:
-                            print(f"Rebalanced into {self.primary} on {date.item().strftime("%A %B %d, %Y")}")
+                            print(f"Rebalanced into {self.primary} on {date.item().strftime('%A %B %d, %Y')}")
                     elif current_difference < 0 and previous_difference >= 0 and weights[primary_idx] == 1.0:
                         weights = alternate_weights
                         heapq.heappush(self.activity_schedule, Rebalance(date, weights))
                         last_rebalance_date = date
                         if trace:
-                            print(f"Rebalanced into {self.alternate} on {date.item().strftime("%A %B %d, %Y")}")
+                            print(f"Rebalanced into {self.alternate} on {date.item().strftime('%A %B %d, %Y')}")
             else:
                 print("Please provide an alternate security ticker if using a primary.")
                 sys.exit(-1)
@@ -195,7 +191,6 @@ class StdDevRebalance(SimpleMovingAverageRebalance):
     def __init__(self, *args: object, **kwargs: object) -> None:
         """Initializes SMA and deviation-window rebalance parameters."""
         super().__init__(**kwargs)
-        self.dxy_adjusted = kwargs.get("dxy_adjusted", False)
         self.long_length = kwargs.get("long_length", 200)
         self.short_length = kwargs.get("short_length", 50)
 
@@ -228,35 +223,6 @@ class StdDevRebalance(SimpleMovingAverageRebalance):
             short_target_sma = short_target_sma[bounds_mask]
             short_target_sma_std_dev = short_target_sma_std_dev[bounds_mask]
             target_price_dates = target_price_dates[bounds_mask]
-
-            # Adjust the index price by the USD index
-            if self.dxy_adjusted:
-                (dxy_price_history, _) = get_historical_data(("DX-Y.NYB",))
-                dxy_price_dates, dxy_price_data = dxy_price_history
-                dxy_price_data = dxy_price_data[:,0] / 100
-
-                dxy_price_data = dxy_price_data[(dxy_price_dates <= stop_date)]
-                dxy_price_dates = dxy_price_dates[(dxy_price_dates <= stop_date)]
-                dxy_price_data = dxy_price_data[(dxy_price_dates >= start_date)]
-                dxy_price_dates = dxy_price_dates[(dxy_price_dates >= start_date)]
-
-                # Adjust futures DXY price data to match the time frame for regular ticker data
-                dates_to_remove = np.setdiff1d(dxy_price_dates, target_price_dates)
-                dxy_price_data = dxy_price_data[~np.isin(dxy_price_dates, dates_to_remove)]
-                dxy_price_dates = dxy_price_dates[~np.isin(dxy_price_dates, dates_to_remove)]
-                new_dates = np.setdiff1d(target_price_dates, dxy_price_dates)
-                new_dates_indices = np.searchsorted(dxy_price_dates, new_dates)
-                dxy_price_dates = np.insert(dxy_price_dates, new_dates_indices, new_dates)
-
-                # Forward fill the missing price data
-                dxy_price_data = np.insert(dxy_price_data, new_dates_indices, np.full(len(new_dates), np.nan))
-                mask = ~np.isnan(dxy_price_data)
-                idx = np.where(mask, np.arange(len(dxy_price_data)), 0)
-                np.maximum.accumulate(idx, out=idx)
-                dxy_price_data = dxy_price_data[idx]
-
-                # Adjust target index
-                target_price_data = target_price_data / dxy_price_data
 
         except RuntimeError as e:
             print(e)
@@ -305,7 +271,6 @@ class SMACrossRebalance(SimpleMovingAverageRebalance):
     def __init__(self, *args: object, **kwargs: object) -> None:
         """Initializes dual-SMA crossover rebalance parameters."""
         super().__init__(**kwargs)
-        self.dxy_adjusted = kwargs.get("dxy_adjusted", False)
         self.long_length = kwargs.get("long_length", None)
         self.short_length = kwargs.get("short_length", None)
         if self.long_length is None:
@@ -340,35 +305,6 @@ class SMACrossRebalance(SimpleMovingAverageRebalance):
             long_target_sma = long_target_sma[bounds_mask]
             short_target_sma = short_target_sma[bounds_mask]
             target_price_dates = target_price_dates[bounds_mask]
-
-            # Adjust the index price by the USD index
-            if self.dxy_adjusted:
-                (dxy_price_history, _) = get_historical_data(("DX-Y.NYB",))
-                dxy_price_dates, dxy_price_data = dxy_price_history
-                dxy_price_data = dxy_price_data[:,0] / 100
-
-                dxy_price_data = dxy_price_data[(dxy_price_dates <= stop_date)]
-                dxy_price_dates = dxy_price_dates[(dxy_price_dates <= stop_date)]
-                dxy_price_data = dxy_price_data[(dxy_price_dates >= start_date)]
-                dxy_price_dates = dxy_price_dates[(dxy_price_dates >= start_date)]
-
-                # Adjust futures DXY price data to match the time frame for regular ticker data
-                dates_to_remove = np.setdiff1d(dxy_price_dates, target_price_dates)
-                dxy_price_data = dxy_price_data[~np.isin(dxy_price_dates, dates_to_remove)]
-                dxy_price_dates = dxy_price_dates[~np.isin(dxy_price_dates, dates_to_remove)]
-                new_dates = np.setdiff1d(target_price_dates, dxy_price_dates)
-                new_dates_indices = np.searchsorted(dxy_price_dates, new_dates)
-                dxy_price_dates = np.insert(dxy_price_dates, new_dates_indices, new_dates)
-
-                # Forward fill the missing price data
-                dxy_price_data = np.insert(dxy_price_data, new_dates_indices, np.full(len(new_dates), np.nan))
-                mask = ~np.isnan(dxy_price_data)
-                idx = np.where(mask, np.arange(len(dxy_price_data)), 0)
-                np.maximum.accumulate(idx, out=idx)
-                dxy_price_data = dxy_price_data[idx]
-
-                # Adjust target index
-                target_price_data = target_price_data / dxy_price_data
 
         except RuntimeError as e:
             print(e)
@@ -405,7 +341,6 @@ class VolatilityAdjustedSMARebalance(SimpleMovingAverageRebalance):
     def __init__(self, *args: object, **kwargs: object) -> None:
         """Initializes volatility-gated SMA rebalance parameters."""
         super().__init__(**kwargs)
-        self.dxy_adjusted = kwargs.get("dxy_adjusted", False)
         self.volatility_length = kwargs.get("volatility_length", self.length)
         self.volatility = kwargs.get("volatility", None)
         if self.volatility is None:
@@ -445,35 +380,6 @@ class VolatilityAdjustedSMARebalance(SimpleMovingAverageRebalance):
             volatility_price_data = volatility_price_data[volatility_bounds_mask]
             volatility_variance = volatility_variance[volatility_bounds_mask]
             volatility_price_dates = volatility_price_dates[volatility_bounds_mask]
-
-            # Adjust the index price by the USD index
-            if self.dxy_adjusted:
-                (dxy_price_history, _) = get_historical_data(("DX-Y.NYB",))
-                dxy_price_dates, dxy_price_data = dxy_price_history
-                dxy_price_data = dxy_price_data[:,0] / 100
-
-                dxy_price_data = dxy_price_data[(dxy_price_dates <= stop_date)]
-                dxy_price_dates = dxy_price_dates[(dxy_price_dates <= stop_date)]
-                dxy_price_data = dxy_price_data[(dxy_price_dates >= start_date)]
-                dxy_price_dates = dxy_price_dates[(dxy_price_dates >= start_date)]
-
-                # Adjust futures DXY price data to match the time frame for regular ticker data
-                dates_to_remove = np.setdiff1d(dxy_price_dates, target_price_dates)
-                dxy_price_data = dxy_price_data[~np.isin(dxy_price_dates, dates_to_remove)]
-                dxy_price_dates = dxy_price_dates[~np.isin(dxy_price_dates, dates_to_remove)]
-                new_dates = np.setdiff1d(target_price_dates, dxy_price_dates)
-                new_dates_indices = np.searchsorted(dxy_price_dates, new_dates)
-                dxy_price_dates = np.insert(dxy_price_dates, new_dates_indices, new_dates)
-
-                # Forward fill the missing price data
-                dxy_price_data = np.insert(dxy_price_data, new_dates_indices, np.full(len(new_dates), np.nan))
-                mask = ~np.isnan(dxy_price_data)
-                idx = np.where(mask, np.arange(len(dxy_price_data)), 0)
-                np.maximum.accumulate(idx, out=idx)
-                dxy_price_data = dxy_price_data[idx]
-
-                # Adjust target index
-                target_price_data = target_price_data / dxy_price_data
 
         except RuntimeError as e:
             print(e)

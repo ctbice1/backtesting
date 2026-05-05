@@ -30,12 +30,12 @@ test:
         minimum_primary_rebalance_days: 2
         primary: TQQQ
         alternate: QQQ
-        trace: true
+        #trace: true
         # name: ScheduledRebalance
         # schedule:
         #   mode: static
         #   format: DAYS
-        #   value: 270
+        #   value: 0
       allocation:
         mode: static
         schedule:
@@ -50,7 +50,7 @@ test:
         #   FDL: 0.0
         #   MLPX: 0.0
       dates:
-        start: "2001-05-04"
+        start: "2006-05-04"
         end: "2026-05-04"
       performance:
         benchmark: ^NDX
