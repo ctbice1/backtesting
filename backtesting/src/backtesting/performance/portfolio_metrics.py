@@ -185,13 +185,13 @@ def sortino_ratio(
     return float(annualized_excess_return / annualized_downside_deviation)
 
 
-def alpha(
+def jensens_alpha(
     portfolio_returns: Sequence[float] | np.ndarray | pd.Series,
     benchmark_returns: Sequence[float] | np.ndarray | pd.Series,
     risk_free_rate: float = 0.0,
     periods_per_year: int = 252,
 ) -> float:
-    """Calculates annualized CAPM alpha."""
+    """Calculates annualized Jensen's Alpha using CAPM expected return."""
     p, b = _aligned_series(portfolio_returns, benchmark_returns)
     if len(p) < 2:
         return float("nan")
@@ -204,6 +204,21 @@ def alpha(
     annualized_benchmark_return = b.mean() * periods_per_year
     expected_return = risk_free_rate + beta_value * (annualized_benchmark_return - risk_free_rate)
     return float(annualized_portfolio_return - expected_return)
+
+
+def alpha(
+    portfolio_returns: Sequence[float] | np.ndarray | pd.Series,
+    benchmark_returns: Sequence[float] | np.ndarray | pd.Series,
+    risk_free_rate: float = 0.0,
+    periods_per_year: int = 252,
+) -> float:
+    """Calculates annualized CAPM alpha."""
+    return jensens_alpha(
+        portfolio_returns,
+        benchmark_returns,
+        risk_free_rate=risk_free_rate,
+        periods_per_year=periods_per_year,
+    )
 
 
 def treynor_ratio(
@@ -281,7 +296,7 @@ def portfolio_performance_summary(
         risk_free_rate=risk_free_rate,
         periods_per_year=periods_per_year,
     )
-    metric_alpha = alpha(
+    metric_jensens_alpha = jensens_alpha(
         portfolio_returns,
         benchmark_returns,
         risk_free_rate=risk_free_rate,
@@ -305,6 +320,7 @@ def portfolio_performance_summary(
         "sharpe_ratio": metric_sharpe,
         "sortino_ratio": metric_sortino,
         "treynor_ratio": metric_treynor,
-        "alpha": metric_alpha,
+        "jensens_alpha": metric_jensens_alpha,
+        "alpha": metric_jensens_alpha,
         "beta": metric_beta,
     }

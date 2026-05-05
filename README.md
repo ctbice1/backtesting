@@ -91,7 +91,7 @@ Each test item under `single` or `simulate` accepts these blocks:
   - `start`: ISO date string (`YYYY-MM-DD`)
   - `end`: ISO date string (`YYYY-MM-DD`)
 - `performance` (optional)
-  - `benchmark`: benchmark ticker/index used for beta, alpha, and Treynor
+  - `benchmark`: benchmark ticker/index used for beta, Jensen's Alpha, and Treynor
   - `risk_free_ticker`: ticker used to estimate risk-free rate (`^IRX` recommended)
   - Required for `single` tests
 - `trace` (optional)
@@ -228,7 +228,7 @@ test:
       trace: false
 ```
 
-For single tests, performance output includes CAGR, Sharpe, Sortino, Treynor, alpha, and beta.
+For single tests, performance output includes CAGR, Sharpe, Sortino, Treynor, Jensen's Alpha, and beta.
 Single-test configs must provide both `performance.benchmark` and
 `performance.risk_free_ticker`. The risk-free ticker is interpreted like `^IRX`
 (close values are yield percentages) and converted to an annualized decimal rate.

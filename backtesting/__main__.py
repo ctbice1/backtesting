@@ -209,7 +209,7 @@ def single_test(config: dict):
     print(f"Sharpe ratio: {_fmt_metric(summary['sharpe_ratio'])}")
     print(f"Sortino ratio: {_fmt_metric(summary['sortino_ratio'])}")
     print(f"Treynor ratio: {_fmt_metric(summary['treynor_ratio'])}")
-    print(f"Alpha: {_fmt_metric(summary['alpha'], percent=True)}")
+    print(f"Jensen's alpha: {_fmt_metric(summary['jensens_alpha'], percent=True)}")
     print(f"Beta: {_fmt_metric(summary['beta'])}")
     if len(portfolio_values) == 0:
         print("Risk metrics unavailable: no tracked portfolio return series was produced.")

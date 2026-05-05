@@ -60,7 +60,39 @@ class SimpleMovingAverageRebalance(Strategy):
         super().__init__(**kwargs)
         self.dxy_adjusted = kwargs.get("dxy_adjusted", False)
         self.target = kwargs.get("target", None)
-        self.length = kwargs.get("length", 200)
+        length = kwargs.get("length", 200)
+        if isinstance(length, bool):
+            print(f"Invalid SMA length for the {__class__.__name__} strategy: {length}. Must be a positive integer.")
+            sys.exit(-1)
+        try:
+            self.length = int(length)
+        except (TypeError, ValueError):
+            print(f"Invalid SMA length for the {__class__.__name__} strategy: {length}. Must be a positive integer.")
+            sys.exit(-1)
+        if self.length < 1:
+            print(f"Invalid SMA length for the {__class__.__name__} strategy: {length}. Must be a positive integer.")
+            sys.exit(-1)
+        minimum_primary_rebalance_days = kwargs.get("minimum_primary_rebalance_days", 0)
+        if isinstance(minimum_primary_rebalance_days, bool):
+            print(
+                f"Invalid minimum primary rebalance days for the {__class__.__name__} strategy: "
+                f"{minimum_primary_rebalance_days}. Must be a non-negative integer."
+            )
+            sys.exit(-1)
+        try:
+            self.minimum_primary_rebalance_days = int(minimum_primary_rebalance_days)
+        except (TypeError, ValueError):
+            print(
+                f"Invalid minimum primary rebalance days for the {__class__.__name__} strategy: "
+                f"{minimum_primary_rebalance_days}. Must be a non-negative integer."
+            )
+            sys.exit(-1)
+        if self.minimum_primary_rebalance_days < 0:
+            print(
+                f"Invalid minimum primary rebalance days for the {__class__.__name__} strategy: "
+                f"{minimum_primary_rebalance_days}. Must be a non-negative integer."
+            )
+            sys.exit(-1)
         self.primary = kwargs.get("primary", None)
         self.alternate = kwargs.get("alternate", None)
         if self.target is None:
@@ -83,37 +115,6 @@ class SimpleMovingAverageRebalance(Strategy):
             start_date = indices[0][0]
             target_price_data = target_price_data[(target_price_dates <= stop_date)]
             target_price_dates = target_price_dates[(target_price_dates <= stop_date)]
-            target_price_data = target_price_data[(target_price_dates >= start_date)]
-            target_price_dates = target_price_dates[(target_price_dates >= start_date)]
-
-            # Adjust the index price by the USD index
-            if self.dxy_adjusted:
-                (dxy_price_history, _) = get_historical_data(("DX-Y.NYB",))
-                dxy_price_dates, dxy_price_data = dxy_price_history
-                dxy_price_data = dxy_price_data[:,0] / 100
-
-                dxy_price_data = dxy_price_data[(dxy_price_dates <= stop_date)]
-                dxy_price_dates = dxy_price_dates[(dxy_price_dates <= stop_date)]
-                dxy_price_data = dxy_price_data[(dxy_price_dates >= start_date)]
-                dxy_price_dates = dxy_price_dates[(dxy_price_dates >= start_date)]
-
-                # Adjust futures DXY price data to match the time frame for regular ticker data
-                dates_to_remove = np.setdiff1d(dxy_price_dates, target_price_dates)
-                dxy_price_data = dxy_price_data[~np.isin(dxy_price_dates, dates_to_remove)]
-                dxy_price_dates = dxy_price_dates[~np.isin(dxy_price_dates, dates_to_remove)]
-                new_dates = np.setdiff1d(target_price_dates, dxy_price_dates)
-                new_dates_indices = np.searchsorted(dxy_price_dates, new_dates)
-                dxy_price_dates = np.insert(dxy_price_dates, new_dates_indices, new_dates)
-
-                # Forward fill the missing price data
-                dxy_price_data = np.insert(dxy_price_data, new_dates_indices, np.full(len(new_dates), np.nan))
-                mask = ~np.isnan(dxy_price_data)
-                idx = np.where(mask, np.arange(len(dxy_price_data)), 0)
-                np.maximum.accumulate(idx, out=idx)
-                dxy_price_data = dxy_price_data[idx]
-
-                # Adjust target index
-                target_price_data = target_price_data / dxy_price_data
 
         except RuntimeError as e:
             print(e)
@@ -122,36 +123,66 @@ class SimpleMovingAverageRebalance(Strategy):
         # Get SMA history for target
         target_sma = SimpleMovingAverage(self.length, target_price_data).history
 
+        bounds_mask = target_price_dates >= start_date
+        target_price_data = target_price_data[bounds_mask]
+        target_sma = target_sma[bounds_mask]
+        target_price_dates = target_price_dates[bounds_mask]
+
         # Default to portfolio weights
         weights = portfolio.weights
+        trace = True
 
         # Use an alternating max-weighting scheme if a primary and alternate were provided
         if self.primary:
             if self.alternate:
 
                 # Fix weights at 100% and 0%, then alternate
-                weights = np.array((1.0, 0.0))
+                if self.primary not in portfolio.ticker_idx:
+                    print(f'Primary ticker "{self.primary}" is not in the portfolio.')
+                    sys.exit(-1)
+                if self.alternate not in portfolio.ticker_idx:
+                    print(f'Alternate ticker "{self.alternate}" is not in the portfolio.')
+                    sys.exit(-1)
+
+                primary_idx = portfolio.ticker_idx[self.primary]
+                alternate_idx = portfolio.ticker_idx[self.alternate]
+                primary_weights = np.zeros(len(portfolio.tickers))
+                alternate_weights = np.zeros(len(portfolio.tickers))
+                primary_weights[primary_idx] = 1.0
+                alternate_weights[alternate_idx] = 1.0
+
+                weights = primary_weights
                 portfolio.weights = weights
 
-                # Create rebalance activities by buying above the 200 day SMA and selling below
-                for i, date in enumerate(target_price_dates):
-                    current_target_sma = target_sma[i]
-                    margin = 0.00 * current_target_sma
-                    margin_above_sma = current_target_sma + margin
-                    margin_below_sma = current_target_sma - margin
-                    current_target_price = target_price_data[i]
+                # Move to alternate on cross below; return to primary only after the cooldown.
+                last_rebalance_date = None
+                for i in range(1, len(target_price_dates)):
+                    previous_difference = target_price_data[i - 1] - target_sma[i - 1]
+                    current_difference = target_price_data[i] - target_sma[i]
+                    date = target_price_dates[i]
+                    days_since_rebalance = None
+                    if last_rebalance_date is not None:
+                        days_since_rebalance = int((date - last_rebalance_date) / np.timedelta64(1, "D"))
 
-                    # Choose the rebalance
-                    if current_target_price >= margin_above_sma and weights[0] == 0.0:
-                        weights = np.array((1.0, 0.0))
+                    if (
+                        current_difference > 0
+                        and weights[primary_idx] == 0.0
+                        and (
+                            days_since_rebalance is None
+                            or days_since_rebalance >= self.minimum_primary_rebalance_days
+                        )
+                    ):
+                        weights = primary_weights
                         heapq.heappush(self.activity_schedule, Rebalance(date, weights))
-                        # if trace:
-                        #     print(f"Rebalanced into {self.primary} on {date.item().strftime("%A %B %d, %Y")}")
-                    elif current_target_price <= margin_below_sma and weights[0] == 1.0:
-                        weights = np.array((0.0, 1.0))
+                        last_rebalance_date = date
+                        if trace:
+                            print(f"Rebalanced into {self.primary} on {date.item().strftime("%A %B %d, %Y")}")
+                    elif current_difference < 0 and previous_difference >= 0 and weights[primary_idx] == 1.0:
+                        weights = alternate_weights
                         heapq.heappush(self.activity_schedule, Rebalance(date, weights))
-                        # if trace:
-                        #     print(f"Rebalanced into {self.alternate} on {date.item().strftime("%A %B %d, %Y")}")
+                        last_rebalance_date = date
+                        if trace:
+                            print(f"Rebalanced into {self.alternate} on {date.item().strftime("%A %B %d, %Y")}")
             else:
                 print("Please provide an alternate security ticker if using a primary.")
                 sys.exit(-1)
