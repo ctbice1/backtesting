@@ -1,3 +1,4 @@
+import os
 import sys
 
 import numpy as np
@@ -12,6 +13,7 @@ from backtesting.core.dates import (
     slice_history,
 )
 from backtesting.data import get_historical_data
+from backtesting.data.market_data import fred_annual_yield_percent_aligned, is_fred_cash_series
 from backtesting.performance import (
     portfolio_performance_summary,
     portfolio_values_from_share_history,
@@ -29,13 +31,27 @@ def test_strategy(
     track: bool = False,
     allocation_weights: tuple[float, ...] | None = None,
     distribution_weights: tuple[float, ...] | None = None,
+    cash_source_ticker: str | None = None,
+    cash_management: str = "sweep",
+    short_term_capital_gains_rate: float = 0.0,
+    long_term_capital_gains_rate: float = 0.0,
+    net_investment_income: bool = False,
+    distribution_taxable_as: tuple[tuple[float, float], ...] | None = None,
 ):
     """Tests a strategy with the provided parameters and data."""
     strategy_cls, strategy_args, securities = strategy_config
     allocation_schedule, initial_allocation, yearly_allocation = test_parameters
 
     tickers, weights = zip(*securities)
-    portfolio = Portfolio(tickers, weights)
+    portfolio = Portfolio(
+        tuple(tickers),
+        tuple(weights),
+        cash_source_ticker=cash_source_ticker,
+        short_term_capital_gains_rate=short_term_capital_gains_rate,
+        long_term_capital_gains_rate=long_term_capital_gains_rate,
+        net_investment_income=net_investment_income,
+        distribution_taxable_as=distribution_taxable_as,
+    )
 
     strategy = strategy_cls(
         initial_allocation=initial_allocation,
@@ -45,6 +61,7 @@ def test_strategy(
         track=track,
         allocation_weights=allocation_weights,
         distribution_weights=distribution_weights,
+        cash_management=cash_management,
         **strategy_args,
     )
 
@@ -54,9 +71,13 @@ def test_strategy(
 
 def single_test(config: dict):
     """Runs a single configured test."""
+    tickers_dir = os.path.join(os.getcwd(), "tickers")
+    cash_src = config["cash_source"]
+    load_tickers = tuple(security[0] for security in config["securities"]) + (cash_src,)
+
     try:
         historical_data = get_historical_data(
-            (security[0] for security in config["securities"]),
+            load_tickers,
             synthetic_securities=config.get("synthetic_securities"),
             financing_config=config.get("synthetic_financing"),
         )
@@ -112,7 +133,11 @@ def single_test(config: dict):
 
     secondary_tickers = []
     for ticker in (benchmark_ticker, risk_free_ticker):
-        if ticker and ticker not in portfolio_tickers and ticker not in secondary_tickers:
+        if not ticker:
+            continue
+        if ticker not in portfolio_tickers and ticker not in secondary_tickers:
+            if is_fred_cash_series(ticker):
+                continue
             secondary_tickers.append(ticker)
 
     secondary_price_dates = None
@@ -143,6 +168,12 @@ def single_test(config: dict):
         track=config["track_performance"],
         allocation_weights=config.get("allocation_weights"),
         distribution_weights=config.get("distribution_weights"),
+        cash_management=config.get("cash_management", "sweep"),
+        cash_source_ticker=cash_src,
+        short_term_capital_gains_rate=config.get("short_term_capital_gains_rate", 0.0),
+        long_term_capital_gains_rate=config.get("long_term_capital_gains_rate", 0.0),
+        net_investment_income=config.get("net_investment_income", True),
+        distribution_taxable_as=config.get("distribution_taxable_as"),
     )
 
     final_prices = price_history[(price_history_dates == stop_date)][0]
@@ -161,15 +192,22 @@ def single_test(config: dict):
         secondary_price_dates,
         secondary_price_history,
     )
-    risk_free_values = _series_for_ticker(
-        risk_free_ticker,
-        portfolio_tickers,
-        price_history_dates,
-        price_history,
-        tuple(secondary_tickers),
-        secondary_price_dates,
-        secondary_price_history,
-    )
+    if is_fred_cash_series(risk_free_ticker):
+        risk_free_values = fred_annual_yield_percent_aligned(
+            risk_free_ticker,
+            pd.to_datetime(price_history_dates),
+            tickers_dir,
+        )
+    else:
+        risk_free_values = _series_for_ticker(
+            risk_free_ticker,
+            portfolio_tickers,
+            price_history_dates,
+            price_history,
+            tuple(secondary_tickers),
+            secondary_price_dates,
+            secondary_price_history,
+        )
     risk_free_rate = risk_free_rate_from_irx(risk_free_values)
     if np.isnan(risk_free_rate):
         risk_free_rate = 0.0
@@ -200,12 +238,16 @@ def single_test(config: dict):
     print(f"Final balance: ${summary['final_balance']:,.2f}")
     print(f"Net new capital: ${summary['net_new_capital']:,.2f}")
     print(f"Distributions: ${summary['distributions']:,.2f}")
+    print(f"Total taxes paid: ${summary['total_taxes_paid']:,.2f}")
+    print(f"Portfolio tax drag: {_fmt_metric(summary['portfolio_tax_drag'], percent=True)}")
     print(f"TTM portfolio yield: {_fmt_metric(summary['ttm_yield'], percent=True)}")
     print(f"Net profit: ${summary['net_profit']:,.2f}")
-    print(f"Total return: {_fmt_metric(summary['total_return'], percent=True)}")
+    print(f"IRR (money-weighted): {_fmt_metric(summary['irr'], percent=True)}")
+    print(f"Simple total return (vs contributed capital): {_fmt_metric(summary['total_return'], percent=True)}")
     print(f"CAGR: {_fmt_metric(summary['cagr'], percent=True)}")
     print(f"Benchmark: {benchmark_ticker}")
-    print(f"Risk-free source: {risk_free_ticker} ({_fmt_metric(risk_free_rate, percent=True)})")
+    rf_src_note = " (FRED)" if is_fred_cash_series(risk_free_ticker) else ""
+    print(f"Risk-free source: {risk_free_ticker}{rf_src_note} ({_fmt_metric(risk_free_rate, percent=True)})")
     print(f"Sharpe ratio: {_fmt_metric(summary['sharpe_ratio'])}")
     print(f"Sortino ratio: {_fmt_metric(summary['sortino_ratio'])}")
     print(f"Treynor ratio: {_fmt_metric(summary['treynor_ratio'])}")

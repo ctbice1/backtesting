@@ -2,35 +2,64 @@ test:
   single:
     - securities:
         - ticker: TQQQ
-          underlying_ticker: ^NDX
-          daily_return_multiplier: 3.0
-          expense_ratio: 0.0082
-          weight: 1.0
-        - ticker: QQQ
-          underlying_ticker: ^NDX
-          daily_return_multiplier: 1.0
-          expense_ratio: 0.0018
+          weight: 0.2
+          distribution_taxable_as:
+            short_term: 1.0
+            long_term: 0.0
+            return_of_capital: 0.0
+        - ticker: QQQM
           weight: 0.0
-        # - ticker: MLPX
-        #   weight: 0.0305
-        # - ticker: FDL
-        #   weight: 0.02925
-        # - ticker: UTES
-        #   weight: 0.04025
-        # - ticker: BTC-USD
-        #   weight: 0.025
-        # - ticker: DBP
-        #   weight: 0.025
-        # - ticker: GPIQ
-        #   weight: 0.025
+          distribution_taxable_as:
+            short_term: 0.0
+            long_term: 1.0
+            return_of_capital: 0.0
+        - ticker: QQQI
+          weight: 0.2
+          distribution_taxable_as:
+            short_term: 0.04
+            long_term: 0.06
+            return_of_capital: 0.9
+        - ticker: BTC-USD
+          weight: 0.0
+        - ticker: FDL
+          weight: 0.2
+          distribution_taxable_as:
+            short_term: 0.0
+            long_term: 1.0
+            return_of_capital: 0.0
+        - ticker: UTES
+          weight: 0.2
+          distribution_taxable_as:
+            short_term: 0.0
+            long_term: 1.0
+            return_of_capital: 0.0
+        - ticker: MLPX
+          weight: 0.2
+          distribution_taxable_as:
+            short_term: 0.5
+            long_term: 0.0
+            return_of_capital: 0.5
       strategy:
         name: SimpleMovingAverageRebalance
         target: ^NDX
         length: 190
-        minimum_primary_rebalance_days: 2
-        primary: TQQQ
-        alternate: QQQ
-        #trace: true
+        rebalance_on_rotation: false
+        take_profit:
+          cooldown: 5
+          rebalance: true
+          trigger:
+            zscore:
+              distance: 2.5
+              length: 60
+          max_cash_ratio: 0.0
+        primary:
+          ticker: TQQQ
+          min_reentry_days: 5
+          min_consecutive_reentry_days: 2
+        alternate:
+          ticker: QQQM
+          min_reentry_days: 1
+          min_consecutive_reentry_days: 1
         # name: ScheduledRebalance
         # schedule:
         #   mode: static
@@ -40,22 +69,38 @@ test:
         mode: static
         schedule:
           format: DAYS
-          value: 7
-        initial: 10000
-        yearly: 1000
-        # weights:
-        #   TQQQ: 1.0
-        #   QQQ: 0.0
-        #   UTES: 0.0
-        #   FDL: 0.0
-        #   MLPX: 0.0
+          value: 60
+        initial: 100000
+        yearly: 10000
+        weights:
+          TQQQ: 1.0
+          QQQM: 0.0
+          QQQI: 0.0
+          FDL: 0.0
+          UTES: 0.0
+          MLPX: 0.0
+          BTC-USD: 0.0
       dates:
-        start: "2006-05-04"
-        end: "2026-05-04"
+        start: "2024-01-30"
+        end: "2026-05-07"
+      # cash_source defaults to TB3MS (FRED synthetic cash NAV + monthly distributions).
+      # Override with a Yahoo ticker (e.g. SHV) for fund-based cash instead.
+      # cash_management: sweep | distribute
+      # sweep (default): cash-sleeve yield stays in cash;
+      # distribute: reinvest all payouts (including cash yield) via distribution weights.
+      cash_management: distribute
+      tax:
+        # Effective tax rates for short-term and long-term capital gains applied to realized gains.
+        capital_gains:
+          short_term:
+            rate: 0.37
+          long_term:
+            rate: 0.2
+        # Applies the 3.8% net investment income tax to taxable distributions and realized gains.
+        net_investment_income: true
       performance:
         benchmark: ^NDX
-        risk_free_ticker: ^IRX
-  #     trace: false
+      trace: false
   # simulate:
   #   - securities:
   #       - ticker: TQQQ

@@ -9,6 +9,7 @@ from backtesting.core.portfolio import Portfolio
 from backtesting.performance.portfolio_metrics import (
     compound_annual_growth_rate,
     jensens_alpha,
+    money_weighted_irr,
     portfolio_performance_summary,
     trailing_twelve_month_yield,
 )
@@ -57,6 +58,7 @@ class PortfolioMetricTests(unittest.TestCase):
         portfolio = Portfolio(("SPY",), (1.0,))
         portfolio.current_shares = np.array([1.21])
         portfolio.total_new_capital = 100.0
+        portfolio.contribution_flows = [(pd.Timestamp("2020-01-01"), 100.0)]
         portfolio_values = pd.Series([100.0, 110.0, 121.0])
 
         summary = portfolio_performance_summary(
@@ -64,10 +66,13 @@ class PortfolioMetricTests(unittest.TestCase):
             final_prices=np.array([100.0]),
             portfolio_values=portfolio_values,
             periods_per_year=2,
+            end_date=pd.Timestamp("2020-12-31"),
         )
 
         self.assertIn("cagr", summary)
         self.assertAlmostEqual(summary["cagr"], 0.21)
+        self.assertIn("irr", summary)
+        self.assertFalse(np.isnan(summary["irr"]))
 
     def test_trailing_twelve_month_yield_uses_distribution_history_window(self) -> None:
         """TTM yield includes distributions in the final 12 calendar months only."""
@@ -115,6 +120,14 @@ class PortfolioMetricTests(unittest.TestCase):
 
         self.assertAlmostEqual(metric, 0.01)
 
+    def test_money_weighted_irr_matches_geometric_return_two_year_deposit(self) -> None:
+        """IRR equals ~10% annual when doubling horizon matches geometric growth."""
+        flows = [(pd.Timestamp("2020-01-01"), 100.0)]
+        terminal = 121.0
+        end = pd.Timestamp("2022-01-01")
+        irr = money_weighted_irr(flows, terminal, end)
+        self.assertAlmostEqual(irr, 0.1, places=3)
+
     def test_portfolio_performance_summary_includes_jensens_alpha(self) -> None:
         """The top-level summary exposes Jensen's Alpha as a named metric."""
         portfolio = Portfolio(("SPY",), (1.0,))
@@ -134,6 +147,22 @@ class PortfolioMetricTests(unittest.TestCase):
 
         self.assertIn("jensens_alpha", summary)
         self.assertAlmostEqual(summary["jensens_alpha"], summary["alpha"])
+
+    def test_portfolio_performance_summary_reports_total_taxes_and_tax_drag(self) -> None:
+        """Tax drag is total taxes as a share of pre-tax performance."""
+        portfolio = Portfolio(("SPY",), (1.0,))
+        portfolio.current_shares = np.array([1.0])
+        portfolio.total_new_capital = 100.0
+        portfolio.total_tax_paid = 5.0
+
+        summary = portfolio_performance_summary(
+            portfolio=portfolio,
+            final_prices=np.array([115.0]),
+        )
+
+        self.assertEqual(summary["total_taxes_paid"], 5.0)
+        self.assertAlmostEqual(summary["portfolio_tax_drag"], 0.25)
+        self.assertNotIn("capital_gains_tax_paid", summary)
 
 
 if __name__ == "__main__":

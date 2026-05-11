@@ -9,6 +9,7 @@ import numpy as np
 import yaml
 
 from backtesting.core.types import Schedule, ScheduleFormat
+from backtesting.data.market_data import is_fred_cash_series
 
 
 def load_yaml_config(config_file_path: str) -> dict:
@@ -108,6 +109,49 @@ def _parse_contribution_weights(
     return tuple(round(v, 4) for v in values)
 
 
+def _raw_nested_capital_gains_rate(tax_config: dict[str, object], term: str) -> object | None:
+    """Reads ``tax.capital_gains.<term>.rate`` when present; otherwise None."""
+    cg = tax_config.get("capital_gains")
+    if not isinstance(cg, dict):
+        return None
+    block = cg.get(term)
+    if isinstance(block, dict) and "rate" in block:
+        return block["rate"]
+    return None
+
+
+def _parse_tax_rate(value: object, context: str) -> float:
+    """Parses a tax rate as a decimal, accepting percentage-style values above 1."""
+    if isinstance(value, bool):
+        print(f"Invalid {context}: {value}. Must be numeric and >= 0.")
+        sys.exit(-1)
+    try:
+        rate = float(value)
+    except (TypeError, ValueError):
+        print(f"Invalid {context}: {value}. Must be numeric and >= 0.")
+        sys.exit(-1)
+    if rate > 1.0:
+        rate = rate / 100.0
+    if rate < 0.0 or rate > 1.0:
+        print(f"Invalid {context}: {value}. Must resolve to a rate between 0 and 1.")
+        sys.exit(-1)
+    return rate
+
+
+def _parse_bool(value: object, context: str) -> bool:
+    """Parses a boolean config value with common string spellings."""
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in ("true", "yes", "1", "on"):
+            return True
+        if normalized in ("false", "no", "0", "off"):
+            return False
+    print(f"Invalid {context}: {value}. Must be true or false.")
+    sys.exit(-1)
+
+
 def get_shared_test_config(config: dict[str, object], test_type: str | None = None) -> dict[str, object]:
     """Loads shared test configuration parameters."""
     securities = config.get("securities", [])
@@ -116,6 +160,7 @@ def get_shared_test_config(config: dict[str, object], test_type: str | None = No
         sys.exit(-1)
 
     synthetic_securities: dict[str, dict[str, object]] = {}
+    distribution_taxable_as: list[tuple[float, float, float]] = []
     for security in securities:
         if "ticker" not in security:
             print(f'Security: {security} must have a ticker symbol specified as: ticker = "symbol".')
@@ -131,6 +176,48 @@ def get_shared_test_config(config: dict[str, object], test_type: str | None = No
         if not ticker:
             print(f"Invalid security ticker: {security['ticker']}. Must be a non-empty string.")
             sys.exit(-1)
+
+        distribution_taxable_as_config = security.get("distribution_taxable_as", {})
+        if distribution_taxable_as_config is None:
+            distribution_taxable_as_config = {}
+        if not isinstance(distribution_taxable_as_config, dict):
+            print(
+                f"Invalid distribution_taxable_as for {ticker}: expected a mapping with "
+                "short_term, long_term, and return_of_capital percentages."
+            )
+            sys.exit(-1)
+        unknown_distribution_tax_keys = set(distribution_taxable_as_config.keys()) - {
+            "short_term",
+            "long_term",
+            "return_of_capital",
+        }
+        if unknown_distribution_tax_keys:
+            print(
+                f"Invalid distribution_taxable_as for {ticker}: unknown key(s): "
+                f"{sorted(unknown_distribution_tax_keys)}."
+            )
+            sys.exit(-1)
+        distribution_short_term = _parse_tax_rate(
+            distribution_taxable_as_config.get("short_term", 0.0),
+            f"securities.{ticker}.distribution_taxable_as.short_term",
+        )
+        distribution_long_term = _parse_tax_rate(
+            distribution_taxable_as_config.get("long_term", 0.0),
+            f"securities.{ticker}.distribution_taxable_as.long_term",
+        )
+        distribution_return_of_capital = _parse_tax_rate(
+            distribution_taxable_as_config.get("return_of_capital", 0.0),
+            f"securities.{ticker}.distribution_taxable_as.return_of_capital",
+        )
+        if distribution_short_term + distribution_long_term + distribution_return_of_capital > 1.0 + 1e-6:
+            print(
+                f"Invalid distribution_taxable_as for {ticker}: short_term, long_term, and return_of_capital "
+                "percentages must sum to 1.0 or less."
+            )
+            sys.exit(-1)
+        distribution_taxable_as.append(
+            (distribution_short_term, distribution_long_term, distribution_return_of_capital)
+        )
 
         if "daily_return_multiplier" not in security:
             continue
@@ -194,6 +281,7 @@ def get_shared_test_config(config: dict[str, object], test_type: str | None = No
 
     config["securities"] = tuple((str(security["ticker"]).strip(), float(security["weight"])) for security in securities)
     config["synthetic_securities"] = synthetic_securities
+    config["distribution_taxable_as"] = tuple(distribution_taxable_as)
 
     financing_config_raw = config.get("financing", {})
     if financing_config_raw is None:
@@ -486,29 +574,92 @@ def get_shared_test_config(config: dict[str, object], test_type: str | None = No
         if not benchmark_ticker:
             benchmark_ticker = None
 
-    risk_free_ticker = performance_config.get(
-        "risk_free_ticker",
-        config.get("risk_free_ticker", "^IRX"),
-    )
+    risk_free_ticker = performance_config.get("risk_free_ticker", config.get("risk_free_ticker", None))
     if isinstance(risk_free_ticker, bool):
-        print("Invalid risk_free_ticker. Expected a string ticker or null.")
+        print(f"Invalid risk_free_ticker: {risk_free_ticker}. Expected a string ticker or null.")
         sys.exit(-1)
     if risk_free_ticker is not None:
         risk_free_ticker = str(risk_free_ticker).strip()
         if not risk_free_ticker:
             risk_free_ticker = None
 
+    cash_source_raw = config.get("cash_source", "TB3MS")
+    if isinstance(cash_source_raw, bool):
+        print(f"Invalid cash_source: {cash_source_raw}. Expected a string ticker.")
+        sys.exit(-1)
+    cash_source = str(cash_source_raw).strip()
+    if not cash_source:
+        cash_source = "TB3MS"
+    if is_fred_cash_series(cash_source):
+        cash_source = cash_source.upper()
+    held = {str(t).strip().upper() for t, _ in config["securities"]}
+    if cash_source.upper() in held:
+        print(
+            f'cash_source "{cash_source}" duplicates a portfolio security ticker; '
+            "use a distinct cash instrument or FRED series id."
+        )
+        sys.exit(-1)
+
+    config["cash_source"] = cash_source
+
+    cash_management_raw = config.get("cash_management", "sweep")
+    if isinstance(cash_management_raw, bool):
+        print(f"Invalid cash_management: {cash_management_raw}. Expected 'distribute' or 'sweep'.")
+        sys.exit(-1)
+    cash_management = str(cash_management_raw).strip().lower()
+    if not cash_management:
+        cash_management = "sweep"
+    if cash_management not in ("distribute", "sweep"):
+        print(
+            f'Invalid cash_management: {cash_management_raw!r}. '
+            "Expected 'distribute' (reinvest cash yield into risky sleeve) or 'sweep' (keep in cash sleeve)."
+        )
+        sys.exit(-1)
+    config["cash_management"] = cash_management
+
+    tax_config = config.get("tax", config.get("tax_drag", {}))
+    if tax_config is None:
+        tax_config = {}
+    if not isinstance(tax_config, dict):
+        print("Invalid tax configuration. Expected a mapping/object.")
+        sys.exit(-1)
+    st_raw = _raw_nested_capital_gains_rate(tax_config, "short_term")
+    st_ctx = "tax.capital_gains.short_term.rate"
+    if st_raw is None:
+        st_raw = tax_config.get(
+            "short_term_capital_gains_rate",
+            tax_config.get("short_term_rate", tax_config.get("short_term", 0.0)),
+        )
+        st_ctx = "tax.short_term_capital_gains_rate"
+    short_term_capital_gains_rate = _parse_tax_rate(st_raw, st_ctx)
+
+    lt_raw = _raw_nested_capital_gains_rate(tax_config, "long_term")
+    lt_ctx = "tax.capital_gains.long_term.rate"
+    if lt_raw is None:
+        lt_raw = tax_config.get(
+            "long_term_capital_gains_rate",
+            tax_config.get("long_term_rate", tax_config.get("long_term", 0.0)),
+        )
+        lt_ctx = "tax.long_term_capital_gains_rate"
+    long_term_capital_gains_rate = _parse_tax_rate(lt_raw, lt_ctx)
+    net_investment_income = _parse_bool(
+        tax_config.get("net_investment_income", True),
+        "tax.net_investment_income",
+    )
+    config["short_term_capital_gains_rate"] = short_term_capital_gains_rate
+    config["long_term_capital_gains_rate"] = long_term_capital_gains_rate
+    config["net_investment_income"] = net_investment_income
+
+    if risk_free_ticker is None:
+        risk_free_ticker = "TB3MS"
+    elif is_fred_cash_series(risk_free_ticker):
+        risk_free_ticker = str(risk_free_ticker).strip().upper()
+
     if test_type == "single":
         if benchmark_ticker is None:
             print(
                 "Single tests require performance.benchmark (or top-level benchmark) "
                 "to calculate benchmark-relative metrics."
-            )
-            sys.exit(-1)
-        if risk_free_ticker is None:
-            print(
-                "Single tests require performance.risk_free_ticker (or top-level risk_free_ticker) "
-                "to calculate risk-adjusted metrics."
             )
             sys.exit(-1)
 
@@ -542,4 +693,10 @@ def get_shared_test_config(config: dict[str, object], test_type: str | None = No
         "risk_free_ticker": config["risk_free_ticker"],
         "allocation_weights": allocation_weights,
         "distribution_weights": distribution_weights,
+        "cash_source": config["cash_source"],
+        "cash_management": config["cash_management"],
+        "short_term_capital_gains_rate": config["short_term_capital_gains_rate"],
+        "long_term_capital_gains_rate": config["long_term_capital_gains_rate"],
+        "net_investment_income": config["net_investment_income"],
+        "distribution_taxable_as": config["distribution_taxable_as"],
     }

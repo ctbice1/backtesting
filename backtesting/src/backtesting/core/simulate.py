@@ -301,6 +301,12 @@ def _build_simulation_cache_key(config: dict, price_dates: np.ndarray) -> str:
         "distribution_contribution_weights": list(dist_w) if dist_w is not None else None,
         "price_start": str(price_dates[0]) if price_dates.size else None,
         "price_stop": str(price_dates[-1]) if price_dates.size else None,
+        "cash_source": config.get("cash_source"),
+        "cash_management": config.get("cash_management", "sweep"),
+        "short_term_capital_gains_rate": config.get("short_term_capital_gains_rate", 0.0),
+        "long_term_capital_gains_rate": config.get("long_term_capital_gains_rate", 0.0),
+        "net_investment_income": config.get("net_investment_income", True),
+        "distribution_taxable_as": config.get("distribution_taxable_as"),
     }
     serialized = json.dumps(payload, sort_keys=True, separators=(",", ":"))
     return hashlib.sha1(serialized.encode("utf-8")).hexdigest()[:12]
@@ -412,7 +418,15 @@ def _test_portfolio(config: dict, test_case: tuple) -> tuple:
     weights, start_date, allocation_schedule, rebalance_schedule = test_case
     tickers = tuple(security[0] for security in config["securities"])
 
-    portfolio = Portfolio(tickers, weights)
+    portfolio = Portfolio(
+        tickers,
+        weights,
+        cash_source_ticker=config.get("cash_source", "TB3MS"),
+        short_term_capital_gains_rate=config.get("short_term_capital_gains_rate", 0.0),
+        long_term_capital_gains_rate=config.get("long_term_capital_gains_rate", 0.0),
+        net_investment_income=config.get("net_investment_income", True),
+        distribution_taxable_as=config.get("distribution_taxable_as"),
+    )
     strategy_args = dict(config.get("strategy_args", {}))
     reserved_strategy_kwargs = {
         "initial_allocation",
@@ -422,6 +436,7 @@ def _test_portfolio(config: dict, test_case: tuple) -> tuple:
         "track",
         "allocation_weights",
         "distribution_weights",
+        "cash_management",
     }
     for key in reserved_strategy_kwargs:
         strategy_args.pop(key, None)
@@ -436,6 +451,7 @@ def _test_portfolio(config: dict, test_case: tuple) -> tuple:
         track=config.get("track_performance", False),
         allocation_weights=config.get("allocation_weights"),
         distribution_weights=config.get("distribution_weights"),
+        cash_management=config.get("cash_management", "sweep"),
         **strategy_args,
     )
 
@@ -461,8 +477,11 @@ def parallel(config: dict) -> None:
 
     # Get historical data
     try:
+        tickers_base = tuple(security[0] for security in config["securities"])
+        cash_src = config.get("cash_source", "TB3MS")
+        ticker_list = tickers_base + (cash_src,)
         price_data, distribution_data = get_historical_data(
-            (security[0] for security in config["securities"]),
+            ticker_list,
             synthetic_securities=config.get("synthetic_securities"),
             financing_config=config.get("synthetic_financing"),
         )

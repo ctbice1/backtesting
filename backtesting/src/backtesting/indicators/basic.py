@@ -80,6 +80,27 @@ class SimpleMovingStdDev:
         self.history[self.length - 1 :] = std_dev
 
 
+class SimpleZScore:
+    """Rolling Z-score indicator relative to a simple moving average."""
+
+    def __init__(self, length: int, prices: np.ndarray) -> None:
+        """Builds a rolling Z-score history over the provided price series."""
+        self.length = _validated_window(length)
+
+        self.history = np.full_like(prices, np.nan, dtype=float)
+        if len(prices) == 0:
+            return
+
+        sma = SimpleMovingAverage(self.length, prices).history
+        std_dev = SimpleMovingStdDev(self.length, prices).history
+        valid_std_dev = std_dev > 0.0
+        self.history[valid_std_dev] = (prices[valid_std_dev] - sma[valid_std_dev]) / std_dev[valid_std_dev]
+
+    def __repr__(self) -> str:
+        """Returns a readable indicator label."""
+        return f"{self.length} day simple Z-score"
+
+
 class SimpleMovingVariance:
     """Rolling sample variance indicator."""
 

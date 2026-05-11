@@ -72,6 +72,8 @@ Each test item under `single` or `simulate` accepts these blocks:
 - `securities` (required)
   - List of `{ticker, weight}` entries
   - Weights must sum to `1.0`
+  - `distribution_taxable_as` is optional per security; `short_term`,
+    `long_term`, and `return_of_capital` percentages all default to `0.0`
   - Optional synthetic-return fields per security:
     - `daily_return_multiplier`: float leverage factor (for example `2.0` or `3.0`)
     - `underlying_ticker`: source ticker used to build synthetic prices (defaults to `ticker`)
@@ -94,6 +96,11 @@ Each test item under `single` or `simulate` accepts these blocks:
   - `benchmark`: benchmark ticker/index used for beta, Jensen's Alpha, and Treynor
   - `risk_free_ticker`: ticker used to estimate risk-free rate (`^IRX` recommended)
   - Required for `single` tests
+- `tax` (optional)
+  - `short_term_capital_gains_rate`: tax rate for realized gains on lots held one year or less
+  - `long_term_capital_gains_rate`: tax rate for realized gains on lots held more than one year
+  - `net_investment_income`: applies the 3.8% net investment income tax to taxable distributions and realized gains (defaults to `true`)
+  - Rates can be decimals (`0.35`) or percentage-style values (`35`)
 - `trace` (optional)
   - Enables detailed transaction output during execution
 - `track_performance` (optional)
@@ -169,6 +176,22 @@ Available strategies in `backtesting/src/backtesting/strategies/rebalance.py`:
 - `VolatilityAdjustedSMARebalance`
 
 Strategy-specific fields (such as `target`, `primary`, `alternate`, SMA lengths, etc.) go under the `strategy` block.
+For primary/alternate SMA strategies, declare each leg as a mapping:
+
+```yaml
+strategy:
+  name: SimpleMovingAverageRebalance
+  target: ^NDX
+  length: 75
+  primary:
+    ticker: TQQQ
+    min_reentry_days: 3
+    min_consecutive_reentry_days: 1
+  alternate:
+    ticker: QQQ
+    min_reentry_days: 0
+    min_consecutive_reentry_days: 1
+```
 
 ### Contribution weights vs rebalance weights
 
@@ -195,6 +218,42 @@ distribution:
   weights:
     TQQQ: 1.0
     QQQI: 0.0
+```
+
+### Tax Drag
+
+When configured, the engine tracks FIFO tax lots from allocations, reinvested
+distributions, and cash-sleeve sweeps. Rebalances and take-profit sales realize
+capital gains; positive gains are taxed as short-term when the lot was held one
+year or less, and long-term after more than one year. Tax paid is removed from
+sale proceeds before replacement shares are purchased.
+
+When `net_investment_income` is enabled, the simulator assumes the portfolio is
+subject to the 3.8% NIIT and applies it to net investment income represented in
+the backtest: taxable distributions and realized positive capital gains.
+
+```yaml
+tax:
+  short_term_capital_gains_rate: 0.35
+  long_term_capital_gains_rate: 0.15
+  net_investment_income: true
+```
+
+Ticker-specific distribution tax character is configured under each security.
+These percentages define how much of that ticker's distributions are taxed using
+the portfolio's configured short-term and long-term capital gains rates.
+`return_of_capital` is not taxed and lowers the holding's cost basis instead.
+The percentages must sum to `1.0` or less; any remainder is not taxed by
+capital gains rates.
+
+```yaml
+securities:
+  - ticker: QQQI
+    weight: 0.2
+    distribution_taxable_as:
+      short_term: 1.0
+      long_term: 0.0
+      return_of_capital: 0.0
 ```
 
 ## Example `simulate` Configuration

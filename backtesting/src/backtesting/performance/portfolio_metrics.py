@@ -1,5 +1,6 @@
 """Portfolio-level performance metric helpers."""
 
+from collections import defaultdict
 from collections.abc import Mapping, Sequence
 from typing import Any
 
@@ -36,6 +37,85 @@ def trailing_twelve_month_yield(
         (distributions.index >= window_start) & (distributions.index <= end_timestamp)
     ].sum()
     return float(ttm_distributions / final_balance)
+
+
+def money_weighted_irr(
+    contribution_flows: Sequence[tuple[Any, float]],
+    terminal_value: float,
+    terminal_date: Any,
+) -> float:
+    """
+    Money-weighted IRR (annual effective rate) from dated investor contributions and terminal wealth.
+
+    Contributions are treated as negative investor cash flows; terminal portfolio value is a positive
+    inflow on ``terminal_date``. Dates are converted with ``pandas.to_datetime`` and spaced using
+    calendar days / 365.25 for discount exponents.
+    """
+    if terminal_value <= 0 or np.isnan(terminal_value):
+        return float("nan")
+    if terminal_date is None:
+        return float("nan")
+    if not contribution_flows:
+        return float("nan")
+
+    net_cf: dict[pd.Timestamp, float] = defaultdict(float)
+    for raw_date, amount in contribution_flows:
+        ts = pd.to_datetime(raw_date).normalize()
+        net_cf[ts] -= float(amount)
+
+    term_ts = pd.to_datetime(terminal_date).normalize()
+    net_cf[term_ts] += float(terminal_value)
+
+    ordered = sorted(net_cf.keys())
+    if len(ordered) < 2:
+        return float("nan")
+
+    times = np.array([(d - ordered[0]).days / 365.25 for d in ordered], dtype=float)
+    cf = np.array([net_cf[d] for d in ordered], dtype=float)
+
+    def npv(rate: float) -> float:
+        return float(np.sum(cf / np.power(1.0 + rate, times)))
+
+    def npv_prime(rate: float) -> float:
+        return float(np.sum(-times * cf / np.power(1.0 + rate, times + 1.0)))
+
+    rate = 0.05
+    for _ in range(80):
+        value = npv(rate)
+        if abs(value) < 1e-10:
+            return float(rate)
+        deriv = npv_prime(rate)
+        if abs(deriv) < 1e-18:
+            break
+        step = value / deriv
+        rate_next = rate - step
+        rate = max(rate_next, -0.9999)
+
+    lo, hi = -0.9999, 100.0
+    v_lo, v_hi = npv(lo), npv(hi)
+    if np.isnan(v_lo) or np.isnan(v_hi):
+        return float("nan")
+    if v_lo * v_hi > 0:
+        for scale in (1_000.0, 1_000_000.0):
+            hi = scale
+            v_hi = npv(hi)
+            if np.isnan(v_hi):
+                continue
+            if v_lo * v_hi <= 0:
+                break
+        else:
+            return float("nan")
+
+    for _ in range(256):
+        mid = 0.5 * (lo + hi)
+        v_mid = npv(mid)
+        if abs(v_mid) < 1e-12:
+            return float(mid)
+        if v_lo * v_mid <= 0:
+            hi, v_hi = mid, v_mid
+        else:
+            lo, v_lo = mid, v_mid
+    return float(0.5 * (lo + hi))
 
 
 def portfolio_values_from_share_history(
@@ -244,9 +324,9 @@ def treynor_ratio(
 
 def risk_free_rate_from_irx(irx_values: Sequence[float] | np.ndarray | pd.Series | None) -> float:
     """
-    Estimates annualized risk-free rate from `^IRX` close values.
+    Mean annualized risk-free rate from yields quoted as percentage points per annum.
 
-    `^IRX` is quoted in annualized yield percentage terms (e.g. 4.85 -> 4.85%).
+    Applies to `^IRX` closes and aligned FRED yields such as TB3MS (e.g. 4.85 → 4.85%/year).
     """
     irx_series = _as_series(irx_values)
     if irx_series.empty:
@@ -270,17 +350,27 @@ def portfolio_performance_summary(
     - final_balance
     - net_new_capital
     - distributions
+    - irr (money-weighted, from dated flows in ``portfolio.contribution_flows``)
     """
     final_balance = float(portfolio.current_value(final_prices))
     net_new_capital = float(portfolio.total_new_capital)
     distributions = float(portfolio.total_distribution)
+    total_taxes_paid = float(getattr(portfolio, "total_tax_paid", 0.0))
     metric_ttm_yield = trailing_twelve_month_yield(
         portfolio.distribution_history,
         final_balance,
         end_date=end_date,
     )
     net_profit = final_balance - net_new_capital
+    pre_tax_net_profit = net_profit + total_taxes_paid
+    if total_taxes_paid == 0.0:
+        portfolio_tax_drag = 0.0
+    elif pre_tax_net_profit > 0.0:
+        portfolio_tax_drag = total_taxes_paid / pre_tax_net_profit
+    else:
+        portfolio_tax_drag = float("nan")
     total_return = (net_profit / net_new_capital) if net_new_capital > 0 else float("nan")
+    metric_irr = money_weighted_irr(portfolio.contribution_flows, final_balance, end_date)
 
     portfolio_returns = _returns_from_values(portfolio_values)
     benchmark_returns = _returns_from_values(benchmark_values)
@@ -314,8 +404,11 @@ def portfolio_performance_summary(
         "final_balance": final_balance,
         "net_new_capital": net_new_capital,
         "distributions": distributions,
+        "total_taxes_paid": total_taxes_paid,
+        "portfolio_tax_drag": float(portfolio_tax_drag),
         "net_profit": net_profit,
         "total_return": float(total_return),
+        "irr": metric_irr,
         "ttm_yield": metric_ttm_yield,
         "cagr": metric_cagr,
         "sharpe_ratio": metric_sharpe,

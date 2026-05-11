@@ -16,6 +16,15 @@ import yfinance as yf
 _FRED_CSV_URL_TEMPLATE = "https://fred.stlouisfed.org/graph/fredgraph.csv?id={series_id}"
 _FRED_DATE_COLUMN_CANDIDATES = ("observation_date", "DATE", "date")
 
+# FRED series IDs used as synthetic cash (yield → NAV + distributions); not loaded via Yahoo.
+FRED_CASH_SERIES_IDS = frozenset({"TB3MS"})
+
+
+def is_fred_cash_series(series_id: str) -> bool:
+    """Returns True if ``series_id`` names a FRED-backed synthetic cash instrument."""
+    sid = str(series_id).strip().upper()
+    return sid in FRED_CASH_SERIES_IDS
+
 
 def _load_raw_ticker_history(ticker: str, tickers_dir: str) -> pd.DataFrame:
     """Loads cached ticker data from disk, downloading if needed."""
@@ -135,6 +144,83 @@ def _load_fred_series(series_id: str, tickers_dir: str) -> pd.Series:
     return series
 
 
+def fred_annual_yield_percent_aligned(
+    series_id: str,
+    trading_index: pd.DatetimeIndex,
+    tickers_dir: str,
+) -> pd.Series:
+    """
+    Aligns a FRED annualized yield series (quoted in percent per annum) to ``trading_index``.
+
+    Monthly series such as TB3MS are forward-filled (then back-filled at the start).
+    """
+    monthly = _load_fred_series(series_id.upper(), tickers_dir)
+    aligned = monthly.reindex(trading_index.normalize()).ffill().bfill()
+    return aligned.astype(float).rename(series_id)
+
+
+def _build_fred_cash_open_close_distributions(
+    series_id: str,
+    trading_index: pd.DatetimeIndex,
+    tickers_dir: str,
+    column_name: str,
+) -> tuple[pd.Series, pd.Series, pd.DataFrame]:
+    """
+    Builds synthetic cash OHLC and dividend-per-share history from a FRED yield series.
+
+    TB3MS-style inputs are quoted as annualized percent (e.g. 5.0 = 5%). Each trading day
+    accrues simple interest at ``yield/100/365``. On the last trading day of each calendar month,
+    accrued interest since the month's opening level is paid as a dividend per share and the
+    end-of-day close resets to that month's opening level (stable NAV around par), matching a
+    distributing money-market style cash sleeve.
+    """
+    y_daily_pct = fred_annual_yield_percent_aligned(series_id, trading_index, tickers_dir)
+    dates = list(trading_index)
+    n = len(dates)
+    if n == 0:
+        empty = pd.Series(dtype=float, index=trading_index)
+        return empty, empty, pd.DataFrame(columns=[column_name])
+
+    opens = np.zeros(n, dtype=float)
+    closes = np.zeros(n, dtype=float)
+    dist = np.zeros(n, dtype=float)
+
+    close_prev = 100.0
+    month_open_nav = 100.0
+
+    y_vals = y_daily_pct.to_numpy(dtype=float, copy=False)
+
+    for i in range(n):
+        dt = dates[i]
+        if i > 0 and dt.month != dates[i - 1].month:
+            month_open_nav = close_prev
+
+        open_i = close_prev
+        r = float(y_vals[i]) / 100.0 / 365.0
+        cum_close = open_i * (1.0 + r)
+
+        last_of_month = (i == n - 1) or (dates[i + 1].month != dt.month)
+        if last_of_month:
+            div_ps = cum_close - month_open_nav
+            if div_ps > 0.0:
+                dist[i] = div_ps
+            close_i = month_open_nav
+            close_prev = close_i
+        else:
+            close_i = cum_close
+            close_prev = close_i
+
+        opens[i] = open_i
+        closes[i] = close_i
+
+    idx = trading_index
+    open_series = pd.Series(opens, index=idx, dtype=float).rename(column_name)
+    close_series = pd.Series(closes, index=idx, dtype=float).rename(column_name)
+    distribution_series = pd.Series(dist, index=idx, dtype=float)
+    distribution_data = distribution_series.loc[distribution_series > 0.0].to_frame(name=column_name)
+    return open_series, close_series, distribution_data
+
+
 def _build_synthetic_open_close(
     source_history: pd.DataFrame,
     daily_return_multiplier: float,
@@ -240,7 +326,15 @@ def get_historical_data(
             series_id = str(financing_config.get("series_id", "DFF")).strip() or "DFF"
             financing_rate_history = _load_fred_series(series_id, tickers_dir)
 
-    for ticker in ticker_list:
+    fred_cash_names = [t for t in ticker_list if is_fred_cash_series(t)]
+    equity_list = [t for t in ticker_list if not is_fred_cash_series(t)]
+    if len(equity_list) == 0:
+        raise RuntimeError(
+            "At least one non-FRED security is required in addition to FRED cash series "
+            f"(got only {ticker_list})."
+        )
+
+    for ticker in equity_list:
         security_spec = synthetic_map.get(ticker)
         if security_spec is not None:
             underlying_ticker = str(security_spec["underlying_ticker"]).strip()
@@ -274,6 +368,24 @@ def get_historical_data(
     distribution_history = distribution_history.fillna(0.0)
     close_history = close_history.dropna()
     open_history = open_history.reindex(close_history.index)
+
+    master_index = close_history.index
+    for fred_name in fred_cash_names:
+        fid = str(fred_name).strip().upper()
+        open_c, close_c, dist_c = _build_fred_cash_open_close_distributions(
+            fid,
+            pd.DatetimeIndex(master_index),
+            tickers_dir,
+            column_name=fred_name,
+        )
+        open_history = open_history.join(open_c.to_frame(), how="left")
+        close_history = close_history.join(close_c.to_frame(), how="left")
+        # Outer join so FRED cash payout dates appear even when no equity dividend row
+        # exists that day; left join would drop TB3MS rows off the equity index (and an
+        # all-synthetic distribution frame can be empty, wiping cash distributions).
+        distribution_history = distribution_history.join(dist_c, how="outer")
+
+    distribution_history = distribution_history.fillna(0.0)
 
     if not distribution_history.empty:
         distribution_history = distribution_history[close_history.index[0] :]
