@@ -161,6 +161,7 @@ def get_shared_test_config(config: dict[str, object], test_type: str | None = No
 
     synthetic_securities: dict[str, dict[str, object]] = {}
     distribution_taxable_as: list[tuple[float, float, float]] = []
+    sell_on_rebalance: list[bool] = []
     for security in securities:
         if "ticker" not in security:
             print(f'Security: {security} must have a ticker symbol specified as: ticker = "symbol".')
@@ -176,6 +177,13 @@ def get_shared_test_config(config: dict[str, object], test_type: str | None = No
         if not ticker:
             print(f"Invalid security ticker: {security['ticker']}. Must be a non-empty string.")
             sys.exit(-1)
+
+        sell_on_rebalance.append(
+            _parse_bool(
+                security.get("sell_on_rebalance", True),
+                f"securities.{ticker}.sell_on_rebalance",
+            )
+        )
 
         distribution_taxable_as_config = security.get("distribution_taxable_as", {})
         if distribution_taxable_as_config is None:
@@ -282,6 +290,7 @@ def get_shared_test_config(config: dict[str, object], test_type: str | None = No
     config["securities"] = tuple((str(security["ticker"]).strip(), float(security["weight"])) for security in securities)
     config["synthetic_securities"] = synthetic_securities
     config["distribution_taxable_as"] = tuple(distribution_taxable_as)
+    config["sell_on_rebalance"] = tuple(sell_on_rebalance)
 
     financing_config_raw = config.get("financing", {})
     if financing_config_raw is None:
@@ -699,4 +708,5 @@ def get_shared_test_config(config: dict[str, object], test_type: str | None = No
         "long_term_capital_gains_rate": config["long_term_capital_gains_rate"],
         "net_investment_income": config["net_investment_income"],
         "distribution_taxable_as": config["distribution_taxable_as"],
+        "sell_on_rebalance": config["sell_on_rebalance"],
     }

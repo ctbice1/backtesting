@@ -11,6 +11,7 @@ from backtesting.performance.portfolio_metrics import (
     jensens_alpha,
     money_weighted_irr,
     portfolio_performance_summary,
+    trailing_twelve_month_distribution_dollars,
     trailing_twelve_month_yield,
 )
 
@@ -87,7 +88,12 @@ class PortfolioMetricTests(unittest.TestCase):
             final_balance=1000.0,
             end_date=pd.Timestamp("2023-12-31"),
         )
+        ttm_dollars = trailing_twelve_month_distribution_dollars(
+            distribution_history,
+            end_date=pd.Timestamp("2023-12-31"),
+        )
 
+        self.assertAlmostEqual(ttm_dollars, 55.0)
         self.assertAlmostEqual(ttm_yield, 0.055)
 
     def test_portfolio_performance_summary_includes_ttm_yield(self) -> None:
@@ -105,6 +111,8 @@ class PortfolioMetricTests(unittest.TestCase):
 
         self.assertIn("ttm_yield", summary)
         self.assertAlmostEqual(summary["ttm_yield"], 0.25)
+        self.assertIn("ttm_distribution_dollars", summary)
+        self.assertAlmostEqual(summary["ttm_distribution_dollars"], 25.0)
 
     def test_jensens_alpha_uses_capm_expected_return(self) -> None:
         """Jensen's Alpha is portfolio return above CAPM expected return."""

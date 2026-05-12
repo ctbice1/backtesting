@@ -343,8 +343,7 @@ class Strategy:
                         cash_distribution *= net_ratio
                         risky_distribution *= net_ratio
                         if cash_distribution != 0.0:
-                            portfolio.unallocated_capital += cash_distribution
-                            portfolio._sweep_residual_to_cash(prices, activity.date)
+                            portfolio._sweep_to_cash(prices, cash_distribution, activity.date)
                         portfolio.allocate(
                             date_string,
                             prices,
@@ -363,7 +362,7 @@ class Strategy:
         if trace:
             ticker_weights = set(zip(portfolio.tickers, portfolio.current_shares))
             print(f"Final share count: {', '.join(f"{ticker}: {round(weight, 3)}" for ticker, weight in ticker_weights)}")
-            print(f"Cash remaining: ${portfolio.unallocated_capital:,.2f}")
+            print(f"Final security values: {', '.join(f"{ticker}: ${value:,.2f}" for ticker, value in zip(portfolio.tickers, portfolio.current_shares * prices))}")
 
         return portfolio, self.parameters()
 

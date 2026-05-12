@@ -36,7 +36,8 @@ def test_strategy(
     short_term_capital_gains_rate: float = 0.0,
     long_term_capital_gains_rate: float = 0.0,
     net_investment_income: bool = False,
-    distribution_taxable_as: tuple[tuple[float, float], ...] | None = None,
+    distribution_taxable_as: tuple[tuple[float, float, float], ...] | None = None,
+    sell_on_rebalance: tuple[bool, ...] | None = None,
 ):
     """Tests a strategy with the provided parameters and data."""
     strategy_cls, strategy_args, securities = strategy_config
@@ -51,6 +52,7 @@ def test_strategy(
         long_term_capital_gains_rate=long_term_capital_gains_rate,
         net_investment_income=net_investment_income,
         distribution_taxable_as=distribution_taxable_as,
+        sell_on_rebalance=sell_on_rebalance,
     )
 
     strategy = strategy_cls(
@@ -174,6 +176,7 @@ def single_test(config: dict):
         long_term_capital_gains_rate=config.get("long_term_capital_gains_rate", 0.0),
         net_investment_income=config.get("net_investment_income", True),
         distribution_taxable_as=config.get("distribution_taxable_as"),
+        sell_on_rebalance=config.get("sell_on_rebalance"),
     )
 
     final_prices = price_history[(price_history_dates == stop_date)][0]
@@ -241,6 +244,7 @@ def single_test(config: dict):
     print(f"Total taxes paid: ${summary['total_taxes_paid']:,.2f}")
     print(f"Portfolio tax drag: {_fmt_metric(summary['portfolio_tax_drag'], percent=True)}")
     print(f"TTM portfolio yield: {_fmt_metric(summary['ttm_yield'], percent=True)}")
+    print(f"TTM portfolio distributions: ${summary['ttm_distribution_dollars']:,.2f}")
     print(f"Net profit: ${summary['net_profit']:,.2f}")
     print(f"IRR (money-weighted): {_fmt_metric(summary['irr'], percent=True)}")
     print(f"Simple total return (vs contributed capital): {_fmt_metric(summary['total_return'], percent=True)}")

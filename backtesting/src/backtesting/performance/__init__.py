@@ -7,5 +7,6 @@ from .portfolio_metrics import (
     portfolio_performance_summary,
     portfolio_values_from_share_history,
     risk_free_rate_from_irx,
+    trailing_twelve_month_distribution_dollars,
     trailing_twelve_month_yield,
 )

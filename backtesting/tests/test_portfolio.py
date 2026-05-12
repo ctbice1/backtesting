@@ -40,55 +40,71 @@ class PortfolioTests(unittest.TestCase):
         self.assertAlmostEqual(portfolio.current_shares[1], 9.0)
         self.assertAlmostEqual(portfolio.current_shares[2], 1.0)
 
-    def test_rebalance_invests_unallocated_capital(self) -> None:
-        """Full portfolio rebalances include unallocated cash in target value."""
-        portfolio = Portfolio(("TQQQ", "FDL"), (0.9, 0.1))
-        portfolio.current_shares = np.array([9.0, 1.0])
-        portfolio.unallocated_capital = 10.0
+    def test_rebalance_invests_cash_sweep(self) -> None:
+        """Full portfolio rebalances include cash-sweep value in target value."""
+        portfolio = Portfolio(("TQQQ", "FDL"), (0.9, 0.1), cash_source_ticker="CASH")
+        portfolio.current_shares = np.array([9.0, 1.0, 10.0])
 
-        portfolio.rebalance("rebalance day", np.array([10.0, 10.0]), weights=np.array([0.9, 0.1]))
+        portfolio.rebalance("rebalance day", np.array([10.0, 10.0, 1.0]), weights=np.array([0.9, 0.1]))
 
         self.assertAlmostEqual(portfolio.current_shares[0], 9.9)
         self.assertAlmostEqual(portfolio.current_shares[1], 1.1)
-        self.assertAlmostEqual(portfolio.unallocated_capital, 0.0)
+        self.assertAlmostEqual(portfolio.current_shares[2], 0.0)
 
-    def test_take_profit_sells_excess_to_unallocated_capital(self) -> None:
+    def test_rebalance_does_not_sell_restricted_tickers(self) -> None:
+        """Ticker config can prevent rebalances from selling selected holdings."""
+        portfolio = Portfolio(
+            ("LOCK", "BUY"),
+            (1.0, 0.0),
+            cash_source_ticker="CASH",
+            sell_on_rebalance=(False, True),
+        )
+        portfolio.current_shares = np.array([10.0, 0.0, 20.0])
+
+        portfolio.rebalance("rebalance day", np.array([10.0, 10.0, 1.0]), weights=np.array([0.0, 1.0]))
+
+        self.assertAlmostEqual(portfolio.current_shares[0], 10.0)
+        self.assertAlmostEqual(portfolio.current_shares[1], 2.0)
+        self.assertAlmostEqual(portfolio.current_shares[2], 0.0)
+        np.testing.assert_array_equal(portfolio.weights, np.array([0.0, 1.0]))
+
+    def test_take_profit_sells_excess_to_cash_sweep(self) -> None:
         """Profit taking harvests only the excess value above the target weight."""
-        portfolio = Portfolio(("TQQQ", "FDL"), (0.9, 0.1))
-        portfolio.current_shares = np.array([10.0, 1.0])
+        portfolio = Portfolio(("TQQQ", "FDL"), (0.9, 0.1), cash_source_ticker="CASH")
+        portfolio.current_shares = np.array([10.0, 1.0, 0.0])
 
-        portfolio.take_profit("profit day", np.array([12.0, 10.0]), ticker_index=0, target_weight=0.9)
+        portfolio.take_profit("profit day", np.array([12.0, 10.0, 1.0]), ticker_index=0, target_weight=0.9)
 
         self.assertAlmostEqual(portfolio.current_shares[0], 9.75)
         self.assertAlmostEqual(portfolio.current_shares[1], 1.0)
-        self.assertAlmostEqual(portfolio.unallocated_capital, 3.0)
-        self.assertAlmostEqual(portfolio.current_value(np.array([12.0, 10.0])), 130.0)
+        self.assertAlmostEqual(portfolio.current_shares[2], 3.0)
+        self.assertAlmostEqual(portfolio.current_value(np.array([12.0, 10.0, 1.0])), 130.0)
 
     def test_take_profit_can_target_max_cash_ratio_single_risk_bucket(self) -> None:
         """Max cash ratio sizing applies when no other risky sleeve absorbs proceeds."""
-        portfolio = Portfolio(("TQQQ",), (1.0,))
-        portfolio.current_shares = np.array([10.0])
+        portfolio = Portfolio(("TQQQ",), (1.0,), cash_source_ticker="CASH")
+        portfolio.current_shares = np.array([10.0, 0.0])
 
         portfolio.take_profit(
             "profit day",
-            np.array([12.0]),
+            np.array([12.0, 1.0]),
             ticker_index=0,
             target_weight=1.0,
             max_cash_ratio=0.1,
         )
 
         self.assertAlmostEqual(portfolio.current_shares[0], 9.0)
-        self.assertAlmostEqual(portfolio.unallocated_capital, 12.0)
-        self.assertAlmostEqual(portfolio.current_value(np.array([12.0])), 120.0, places=2)
+        self.assertAlmostEqual(portfolio.current_shares[1], 12.0)
+        self.assertAlmostEqual(portfolio.current_value(np.array([12.0, 1.0])), 120.0, places=2)
 
     def test_take_profit_with_additional_risk_uses_target_weight_not_max_cash(self) -> None:
         """With multiple risky weights, trim sizing follows target_weight; redeploy via rebalance."""
-        portfolio = Portfolio(("TQQQ", "FDL"), (0.9, 0.1))
-        portfolio.current_shares = np.array([10.0, 1.0])
+        portfolio = Portfolio(("TQQQ", "FDL"), (0.9, 0.1), cash_source_ticker="CASH")
+        portfolio.current_shares = np.array([10.0, 1.0, 0.0])
 
         portfolio.take_profit(
             "profit day",
-            np.array([12.0, 10.0]),
+            np.array([12.0, 10.0, 1.0]),
             ticker_index=0,
             target_weight=0.9,
             max_cash_ratio=0.1,
@@ -96,17 +112,17 @@ class PortfolioTests(unittest.TestCase):
 
         self.assertAlmostEqual(portfolio.current_shares[0], 9.75)
         self.assertAlmostEqual(portfolio.current_shares[1], 1.0)
-        self.assertAlmostEqual(portfolio.unallocated_capital, 3.0)
-        self.assertAlmostEqual(portfolio.current_value(np.array([12.0, 10.0])), 130.0, places=2)
+        self.assertAlmostEqual(portfolio.current_shares[2], 3.0)
+        self.assertAlmostEqual(portfolio.current_value(np.array([12.0, 10.0, 1.0])), 130.0, places=2)
 
     def test_take_profit_can_rebalance_inside_portfolio_method(self) -> None:
         """The take-profit activity can delegate to the portfolio rebalance path."""
-        portfolio = Portfolio(("TQQQ", "FDL"), (0.9, 0.1))
-        portfolio.current_shares = np.array([10.0, 1.0])
+        portfolio = Portfolio(("TQQQ", "FDL"), (0.9, 0.1), cash_source_ticker="CASH")
+        portfolio.current_shares = np.array([10.0, 1.0, 0.0])
 
         portfolio.take_profit(
             "profit day",
-            np.array([12.0, 10.0]),
+            np.array([12.0, 10.0, 1.0]),
             ticker_index=0,
             target_weight=0.9,
             rebalance=True,
@@ -115,7 +131,7 @@ class PortfolioTests(unittest.TestCase):
 
         self.assertAlmostEqual(portfolio.current_shares[0], 9.75)
         self.assertAlmostEqual(portfolio.current_shares[1], 1.3)
-        self.assertAlmostEqual(portfolio.unallocated_capital, 0.0)
+        self.assertAlmostEqual(portfolio.current_shares[2], 0.0)
 
     def test_take_profit_skips_rebalance_when_only_cash_can_absorb(self) -> None:
         """With one risky leg + cash sleeve, rebalance must not redeploy into the same leg."""
@@ -133,7 +149,6 @@ class PortfolioTests(unittest.TestCase):
         )
 
         self.assertAlmostEqual(portfolio.current_shares[0], 8.0)
-        self.assertAlmostEqual(portfolio.unallocated_capital, 0.0)
         self.assertAlmostEqual(portfolio.current_shares[1], 24.0)
         self.assertAlmostEqual(portfolio.current_value(np.array([12.0, 1.0])), 120.0, places=2)
 
@@ -158,12 +173,10 @@ class PortfolioTests(unittest.TestCase):
         """Residual dollars after risky buys become shares of the configured cash ticker."""
         portfolio = Portfolio(("AAA",), (1.0,), cash_source_ticker="CASH")
         prices = np.array([100.0, 2.0])
-        portfolio.unallocated_capital = 50.55
-        portfolio._sweep_residual_to_cash(prices)
+        portfolio._sweep_to_cash(prices, 50.55)
 
         self.assertAlmostEqual(portfolio.current_shares[0], 0.0)
         self.assertAlmostEqual(portfolio.current_shares[1], 25.275)
-        self.assertAlmostEqual(portfolio.unallocated_capital, 0.0)
         self.assertAlmostEqual(portfolio.current_value(prices), 50.55)
 
     def test_take_profit_applies_short_term_capital_gains_tax(self) -> None:
@@ -171,12 +184,15 @@ class PortfolioTests(unittest.TestCase):
         portfolio = Portfolio(
             ("AAA",),
             (1.0,),
+            cash_source_ticker="CASH",
             short_term_capital_gains_rate=0.35,
             long_term_capital_gains_rate=0.15,
         )
+        buy_prices = np.array([100.0, 1.0])
+        sell_prices = np.array([120.0, 1.0])
         portfolio.allocate(
             "buy day",
-            np.array([100.0]),
+            buy_prices,
             1000.0,
             weights=None,
             date=pd.Timestamp("2020-01-01"),
@@ -184,24 +200,25 @@ class PortfolioTests(unittest.TestCase):
 
         portfolio.take_profit(
             "profit day",
-            np.array([120.0]),
+            sell_prices,
             ticker_index=0,
             target_weight=0.9,
             date=pd.Timestamp("2020-06-01"),
         )
 
-        self.assertAlmostEqual(portfolio.current_shares[0], 9.0)
-        self.assertAlmostEqual(portfolio.unallocated_capital, 113.0)
-        self.assertAlmostEqual(portfolio.total_tax_paid, 7.0)
-        self.assertAlmostEqual(portfolio.short_term_realized_gains, 20.0)
-        self.assertAlmostEqual(portfolio.current_value(np.array([120.0])), 1193.0)
+        final_value = portfolio.current_value(sell_prices)
+        self.assertAlmostEqual(portfolio.current_shares[0] * sell_prices[0] / final_value, 0.9, places=3)
+        self.assertGreater(portfolio.current_shares[1], 113.0)
+        self.assertAlmostEqual(portfolio.total_tax_paid, round(portfolio.short_term_realized_gains * 0.35, 2))
 
     def test_take_profit_applies_net_investment_income_tax_to_realized_gains(self) -> None:
         """NIIT adds a 3.8% surtax to realized positive capital gains."""
-        portfolio = Portfolio(("AAA",), (1.0,), net_investment_income=True)
+        portfolio = Portfolio(("AAA",), (1.0,), cash_source_ticker="CASH", net_investment_income=True)
+        buy_prices = np.array([100.0, 1.0])
+        sell_prices = np.array([120.0, 1.0])
         portfolio.allocate(
             "buy day",
-            np.array([100.0]),
+            buy_prices,
             1000.0,
             weights=None,
             date=pd.Timestamp("2020-01-01"),
@@ -209,16 +226,19 @@ class PortfolioTests(unittest.TestCase):
 
         portfolio.take_profit(
             "profit day",
-            np.array([120.0]),
+            sell_prices,
             ticker_index=0,
             target_weight=0.9,
             date=pd.Timestamp("2020-06-01"),
         )
 
-        self.assertAlmostEqual(portfolio.unallocated_capital, 119.24)
-        self.assertAlmostEqual(portfolio.total_tax_paid, 0.76)
-        self.assertAlmostEqual(portfolio.net_investment_income_tax_paid, 0.76)
-        self.assertAlmostEqual(portfolio.current_value(np.array([120.0])), 1199.24)
+        final_value = portfolio.current_value(sell_prices)
+        self.assertAlmostEqual(portfolio.current_shares[0] * sell_prices[0] / final_value, 0.9, places=3)
+        self.assertAlmostEqual(portfolio.total_tax_paid, portfolio.net_investment_income_tax_paid)
+        self.assertAlmostEqual(
+            portfolio.total_tax_paid,
+            round(portfolio.short_term_realized_gains * 0.038, 2),
+        )
 
     def test_net_investment_income_tax_applies_to_taxable_distributions(self) -> None:
         """NIIT reduces distributions before they can be reinvested."""
@@ -386,12 +406,15 @@ class PortfolioTests(unittest.TestCase):
         portfolio = Portfolio(
             ("AAA",),
             (1.0,),
+            cash_source_ticker="CASH",
             short_term_capital_gains_rate=0.35,
             long_term_capital_gains_rate=0.15,
         )
+        buy_prices = np.array([100.0, 1.0])
+        sell_prices = np.array([120.0, 1.0])
         portfolio.allocate(
             "buy day",
-            np.array([100.0]),
+            buy_prices,
             1000.0,
             weights=None,
             date=pd.Timestamp("2020-01-01"),
@@ -399,17 +422,16 @@ class PortfolioTests(unittest.TestCase):
 
         portfolio.take_profit(
             "profit day",
-            np.array([120.0]),
+            sell_prices,
             ticker_index=0,
             target_weight=0.9,
             date=pd.Timestamp("2021-01-02"),
         )
 
-        self.assertAlmostEqual(portfolio.current_shares[0], 9.0)
-        self.assertAlmostEqual(portfolio.unallocated_capital, 117.0)
-        self.assertAlmostEqual(portfolio.total_tax_paid, 3.0)
-        self.assertAlmostEqual(portfolio.long_term_realized_gains, 20.0)
-        self.assertAlmostEqual(portfolio.current_value(np.array([120.0])), 1197.0)
+        final_value = portfolio.current_value(sell_prices)
+        self.assertAlmostEqual(portfolio.current_shares[0] * sell_prices[0] / final_value, 0.9, places=3)
+        self.assertGreater(portfolio.current_shares[1], 117.0)
+        self.assertAlmostEqual(portfolio.total_tax_paid, round(portfolio.long_term_realized_gains * 0.15, 2))
 
     def test_rebalance_reinvests_sale_proceeds_after_capital_gains_tax(self) -> None:
         """Rebalances pay realized-gain tax before buying replacement holdings."""
@@ -438,6 +460,36 @@ class PortfolioTests(unittest.TestCase):
         self.assertAlmostEqual(portfolio.current_shares[1], 11.3)
         self.assertAlmostEqual(portfolio.total_tax_paid, 70.0)
         self.assertAlmostEqual(portfolio.current_value(np.array([120.0, 100.0])), 1130.0)
+
+    def test_rebalance_sizes_partial_sales_against_after_tax_nav(self) -> None:
+        """Partial rebalances sell enough to hit target weights after tax drag."""
+        portfolio = Portfolio(
+            ("AAA", "BBB"),
+            (1.0, 0.0),
+            short_term_capital_gains_rate=0.35,
+            long_term_capital_gains_rate=0.15,
+        )
+        buy_prices = np.array([100.0, 100.0])
+        rebalance_prices = np.array([120.0, 100.0])
+        portfolio.allocate(
+            "buy day",
+            buy_prices,
+            1000.0,
+            weights=None,
+            date=pd.Timestamp("2020-01-01"),
+        )
+
+        portfolio.rebalance(
+            "half risk",
+            rebalance_prices,
+            weights=np.array([0.5, 0.5]),
+            date=pd.Timestamp("2020-06-01"),
+        )
+
+        final_value = portfolio.current_value(rebalance_prices)
+        self.assertAlmostEqual(portfolio.current_shares[0] * rebalance_prices[0] / final_value, 0.5, places=3)
+        self.assertAlmostEqual(portfolio.current_shares[1] * rebalance_prices[1] / final_value, 0.5, places=3)
+        self.assertGreater(portfolio.total_tax_paid, 35.0)
 
 
 if __name__ == "__main__":

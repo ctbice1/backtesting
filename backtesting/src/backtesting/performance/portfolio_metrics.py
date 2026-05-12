@@ -11,14 +11,11 @@ from backtesting.core.portfolio import Portfolio
 from backtesting.performance.metrics import portfolio_value_history
 
 
-def trailing_twelve_month_yield(
+def trailing_twelve_month_distribution_dollars(
     distribution_history: Mapping[Any, float] | None,
-    final_balance: float,
     end_date: Any | None = None,
 ) -> float:
-    """Calculates TTM yield as last-12-month distributions divided by portfolio value."""
-    if final_balance <= 0 or np.isnan(final_balance):
-        return float("nan")
+    """Sum of distributions received in the trailing twelve months ending at ``end_date``."""
     if not distribution_history:
         return 0.0
 
@@ -33,9 +30,24 @@ def trailing_twelve_month_yield(
         end_timestamp = pd.to_datetime(end_date)
 
     window_start = end_timestamp - pd.DateOffset(months=12)
-    ttm_distributions = distributions[
-        (distributions.index >= window_start) & (distributions.index <= end_timestamp)
-    ].sum()
+    return float(
+        distributions[
+            (distributions.index >= window_start) & (distributions.index <= end_timestamp)
+        ].sum()
+    )
+
+
+def trailing_twelve_month_yield(
+    distribution_history: Mapping[Any, float] | None,
+    final_balance: float,
+    end_date: Any | None = None,
+) -> float:
+    """Calculates TTM yield as last-12-month distributions divided by portfolio value."""
+    if final_balance <= 0 or np.isnan(final_balance):
+        return float("nan")
+    ttm_distributions = trailing_twelve_month_distribution_dollars(
+        distribution_history, end_date=end_date
+    )
     return float(ttm_distributions / final_balance)
 
 
@@ -350,12 +362,17 @@ def portfolio_performance_summary(
     - final_balance
     - net_new_capital
     - distributions
+    - ttm_yield / ttm_distribution_dollars (trailing twelve months to ``end_date``)
     - irr (money-weighted, from dated flows in ``portfolio.contribution_flows``)
     """
     final_balance = float(portfolio.current_value(final_prices))
     net_new_capital = float(portfolio.total_new_capital)
     distributions = float(portfolio.total_distribution)
     total_taxes_paid = float(getattr(portfolio, "total_tax_paid", 0.0))
+    metric_ttm_distribution_dollars = trailing_twelve_month_distribution_dollars(
+        portfolio.distribution_history,
+        end_date=end_date,
+    )
     metric_ttm_yield = trailing_twelve_month_yield(
         portfolio.distribution_history,
         final_balance,
@@ -410,6 +427,7 @@ def portfolio_performance_summary(
         "total_return": float(total_return),
         "irr": metric_irr,
         "ttm_yield": metric_ttm_yield,
+        "ttm_distribution_dollars": metric_ttm_distribution_dollars,
         "cagr": metric_cagr,
         "sharpe_ratio": metric_sharpe,
         "sortino_ratio": metric_sortino,

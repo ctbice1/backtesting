@@ -307,6 +307,7 @@ def _build_simulation_cache_key(config: dict, price_dates: np.ndarray) -> str:
         "long_term_capital_gains_rate": config.get("long_term_capital_gains_rate", 0.0),
         "net_investment_income": config.get("net_investment_income", True),
         "distribution_taxable_as": config.get("distribution_taxable_as"),
+        "sell_on_rebalance": config.get("sell_on_rebalance"),
     }
     serialized = json.dumps(payload, sort_keys=True, separators=(",", ":"))
     return hashlib.sha1(serialized.encode("utf-8")).hexdigest()[:12]
@@ -426,6 +427,7 @@ def _test_portfolio(config: dict, test_case: tuple) -> tuple:
         long_term_capital_gains_rate=config.get("long_term_capital_gains_rate", 0.0),
         net_investment_income=config.get("net_investment_income", True),
         distribution_taxable_as=config.get("distribution_taxable_as"),
+        sell_on_rebalance=config.get("sell_on_rebalance"),
     )
     strategy_args = dict(config.get("strategy_args", {}))
     reserved_strategy_kwargs = {

@@ -7,7 +7,7 @@ test:
             short_term: 1.0
             long_term: 0.0
             return_of_capital: 0.0
-        - ticker: QQQM
+        - ticker: QQQ
           weight: 0.0
           distribution_taxable_as:
             short_term: 0.0
@@ -15,6 +15,7 @@ test:
             return_of_capital: 0.0
         - ticker: QQQI
           weight: 0.2
+          sell_on_rebalance: false
           distribution_taxable_as:
             short_term: 0.04
             long_term: 0.06
@@ -23,18 +24,21 @@ test:
           weight: 0.0
         - ticker: FDL
           weight: 0.2
+          sell_on_rebalance: false
           distribution_taxable_as:
             short_term: 0.0
             long_term: 1.0
             return_of_capital: 0.0
         - ticker: UTES
           weight: 0.2
+          sell_on_rebalance: false
           distribution_taxable_as:
             short_term: 0.0
             long_term: 1.0
             return_of_capital: 0.0
         - ticker: MLPX
           weight: 0.2
+          sell_on_rebalance: false
           distribution_taxable_as:
             short_term: 0.5
             long_term: 0.0
@@ -57,7 +61,7 @@ test:
           min_reentry_days: 5
           min_consecutive_reentry_days: 2
         alternate:
-          ticker: QQQM
+          ticker: QQQ
           min_reentry_days: 1
           min_consecutive_reentry_days: 1
         # name: ScheduledRebalance
@@ -74,7 +78,7 @@ test:
         yearly: 10000
         weights:
           TQQQ: 1.0
-          QQQM: 0.0
+          QQQ: 0.0
           QQQI: 0.0
           FDL: 0.0
           UTES: 0.0
@@ -82,7 +86,7 @@ test:
           BTC-USD: 0.0
       dates:
         start: "2024-01-30"
-        end: "2026-05-07"
+        end: "2026-05-11"
       # cash_source defaults to TB3MS (FRED synthetic cash NAV + monthly distributions).
       # Override with a Yahoo ticker (e.g. SHV) for fund-based cash instead.
       # cash_management: sweep | distribute

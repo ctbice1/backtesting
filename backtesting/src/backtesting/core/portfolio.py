@@ -29,6 +29,7 @@ class Portfolio:
         long_term_capital_gains_rate: float = 0.0,
         net_investment_income: bool = False,
         distribution_taxable_as: tuple[tuple[float, float, float], ...] | None = None,
+        sell_on_rebalance: tuple[bool, ...] | None = None,
     ) -> None:
         """Initializes portfolio holdings, weights, and execution totals."""
         self.risky_count = len(tickers)
@@ -48,6 +49,13 @@ class Portfolio:
         self.short_term_capital_gains_rate = float(short_term_capital_gains_rate)
         self.long_term_capital_gains_rate = float(long_term_capital_gains_rate)
         self.net_investment_income = bool(net_investment_income)
+        if sell_on_rebalance is None:
+            sell_on_rebalance = tuple(True for _ in range(self.risky_count))
+        if len(sell_on_rebalance) != self.risky_count:
+            raise ValueError("sell_on_rebalance count must match risky tickers.")
+        self.sell_on_rebalance = tuple(bool(value) for value in sell_on_rebalance)
+        if self.cash_index is not None:
+            self.sell_on_rebalance = (*self.sell_on_rebalance, True)
         if distribution_taxable_as is None:
             distribution_taxable_as = tuple((0.0, 0.0, 0.0) for _ in range(self.risky_count))
         if len(distribution_taxable_as) != self.risky_count:
@@ -85,12 +93,17 @@ class Portfolio:
         self.total_new_capital = 0.0
         self.total_distribution = 0.0
         self.distribution_history = {}
-        self.unallocated_capital = 0.0
         self.contribution_flows: list[tuple[object, float]] = []
 
     def current_value(self, price_data: np.ndarray) -> float:
-        """Returns the current total value of holdings plus unallocated cash."""
-        return float(np.sum(self.current_shares * price_data) + self.unallocated_capital)
+        """Returns the current total value of holdings, including the cash sweep."""
+        return float(np.sum(self.current_shares * price_data))
+
+    def _cash_value(self, price_data: np.ndarray) -> float:
+        """Returns the current value of the configured cash sweep."""
+        if self.cash_index is None:
+            return 0.0
+        return float(round(self.current_shares[self.cash_index] * price_data[self.cash_index], 2))
 
     def record_distribution(self, date: object, amount: float) -> None:
         """Records portfolio-level distributions paid on a specific date."""
@@ -266,6 +279,39 @@ class Portfolio:
         self.total_tax_paid += tax_paid
         return tax_paid
 
+    def _estimate_sale_tax(
+        self,
+        ticker_index: int,
+        shares: float,
+        price: float,
+        date: object | None,
+    ) -> float:
+        """Estimates FIFO tax for a sale without changing shares or tax lots."""
+        if shares <= 0.0 or not self._tax_enabled():
+            return 0.0
+
+        sell_date = self._normalize_tax_date(date)
+        remaining = min(float(shares), float(self.current_shares[ticker_index]))
+        tax_due = 0.0
+        lots = self.tax_lots[ticker_index]
+        tolerance = 1e-9
+
+        for lot in lots:
+            if remaining <= tolerance:
+                break
+            sold = min(remaining, lot.shares)
+            gain = sold * (float(price) - lot.cost_basis)
+            if gain > 0.0:
+                if self.net_investment_income:
+                    tax_due += gain * NET_INVESTMENT_INCOME_TAX_RATE
+                if self._is_long_term_lot(lot.acquisition_date, sell_date):
+                    tax_due += gain * self.long_term_capital_gains_rate
+                else:
+                    tax_due += gain * self.short_term_capital_gains_rate
+            remaining = round(remaining - sold, 10)
+
+        return float(round(tax_due, 2))
+
     def _buy_shares(
         self,
         ticker_index: int,
@@ -280,21 +326,21 @@ class Portfolio:
         self._add_tax_lot(ticker_index, shares, price, date)
         return float(round(shares * price, 2))
 
-    def _sweep_residual_to_cash(self, price_data: np.ndarray, date: object | None = None) -> None:
-        """Converts residual ``unallocated_capital`` into shares of the cash instrument."""
+    def _sweep_to_cash(self, price_data: np.ndarray, amount: float, date: object | None = None) -> float:
+        """Converts available dollars into shares of the cash instrument."""
+        cash = float(amount)
+        if cash <= 0.0:
+            return 0.0
         if self.cash_index is None:
-            return
+            return cash
         px = float(price_data[self.cash_index])
         if px <= 0.0 or np.isnan(px):
-            return
-        cash = self.unallocated_capital
-        if cash < 1.0:
-            return
+            return cash
         delta_shares = round(cash / px, 4)
         if delta_shares <= 0.0:
-            return
+            return cash
         spent = self._buy_shares(self.cash_index, delta_shares, px, date)
-        self.unallocated_capital = max(0.0, cash - spent)
+        return max(0.0, cash - spent)
 
     def allocate(
         self,
@@ -315,19 +361,18 @@ class Portfolio:
         if weights is None:
             weights = self.weights
 
-        # Account for new capital
-        self.unallocated_capital += amount
+        available_capital = float(amount)
 
-        # Don't allocate anything less than $1
-        if amount < 1.0:
-            self._sweep_residual_to_cash(price_data, date)
+        # Don't allocate anything less than $1 to risky assets.
+        if available_capital < 1.0:
+            self._sweep_to_cash(price_data, available_capital, date)
             return
 
         weights_arr = np.asarray(weights, dtype=float).ravel()
         risky_prices = price_data[: self.risky_count]
 
         # Get target ticker values (risky sleeve only)
-        ticker_values = (weights_arr * self.unallocated_capital).round(decimals=2)
+        ticker_values = (weights_arr * available_capital).round(decimals=2)
 
         # Convert values to shares
         with np.errstate(divide="ignore", invalid="ignore"):
@@ -337,9 +382,8 @@ class Portfolio:
         spent_risky = 0.0
         for i, shares in enumerate(ticker_share_deltas_risky):
             spent_risky += self._buy_shares(i, float(shares), float(risky_prices[i]), date)
-        self.unallocated_capital = max(0.0, self.unallocated_capital - spent_risky)
 
-        self._sweep_residual_to_cash(price_data, date)
+        self._sweep_to_cash(price_data, max(0.0, available_capital - spent_risky), date)
 
         if trace:
             parts = [
@@ -375,92 +419,100 @@ class Portfolio:
         # Get current ticker values
         current_ticker_values = self.current_shares * price_data
 
-        # Get target ticker values
-        if rebalance_indices is None:
-            if self.cash_index is None:
-                target_ticker_values = weights_arr * current_portfolio_value
-            else:
-                if len(weights_arr) != self.risky_count:
-                    raise ValueError(
-                        "Target weights length must match risky tickers when cash_source is configured."
-                    )
-                target_ticker_values = np.zeros(len(self.tickers), dtype=float)
-                target_ticker_values[: self.risky_count] = weights_arr * current_portfolio_value
-                target_ticker_values[self.cash_index] = current_portfolio_value - np.sum(
-                    target_ticker_values[: self.risky_count]
-                )
-        else:
+        can_sell = np.asarray(self.sell_on_rebalance, dtype=bool)
+        rebalance_indices_array = None
+        scoped_weights = None
+        scoped_weight_total = None
+        scoped_current_value = None
+        if rebalance_indices is not None:
             rebalance_indices_array = np.array(rebalance_indices, dtype=int)
             scoped_weights = weights_arr[rebalance_indices_array]
             scoped_weight_total = np.sum(scoped_weights)
             if scoped_weight_total <= 0.0:
                 return
-
-            target_ticker_values = current_ticker_values.copy()
             scoped_current_value = np.sum(current_ticker_values[rebalance_indices_array]).round(decimals=2)
-            target_ticker_values[rebalance_indices_array] = (
-                scoped_weights / scoped_weight_total * scoped_current_value
+
+        filtered_ticker_value_deltas = np.zeros(len(self.tickers), dtype=float)
+        tax_estimate = 0.0
+        for _ in range(8):
+            effective_portfolio_value = max(0.0, current_portfolio_value - tax_estimate)
+
+            if rebalance_indices is None:
+                if self.cash_index is None:
+                    target_ticker_values = weights_arr * effective_portfolio_value
+                else:
+                    if len(weights_arr) != self.risky_count:
+                        raise ValueError(
+                            "Target weights length must match risky tickers when cash_source is configured."
+                        )
+                    target_ticker_values = np.zeros(len(self.tickers), dtype=float)
+                    target_ticker_values[: self.risky_count] = weights_arr * effective_portfolio_value
+                    target_ticker_values[self.cash_index] = effective_portfolio_value - np.sum(
+                        target_ticker_values[: self.risky_count]
+                    )
+            else:
+                assert rebalance_indices_array is not None
+                assert scoped_weights is not None
+                assert scoped_weight_total is not None
+                assert scoped_current_value is not None
+                target_ticker_values = current_ticker_values.copy()
+                effective_scoped_value = max(0.0, float(scoped_current_value) - tax_estimate)
+                target_ticker_values[rebalance_indices_array] = (
+                    scoped_weights / scoped_weight_total * effective_scoped_value
+                )
+
+            ticker_value_deltas = target_ticker_values - current_ticker_values
+            filtered_ticker_value_deltas = np.where(
+                (ticker_value_deltas >= 1.0) | (ticker_value_deltas <= -1.0),
+                ticker_value_deltas,
+                0.0,
+            )
+            filtered_ticker_value_deltas = np.where(
+                (filtered_ticker_value_deltas < 0.0) & ~can_sell,
+                0.0,
+                filtered_ticker_value_deltas,
             )
 
-        # Remove any excess required capital
-        target_portfolio_value = np.sum(target_ticker_values)
-        if target_portfolio_value > current_portfolio_value:
-            excess_amount = target_portfolio_value - current_portfolio_value
-            weights_norm = target_ticker_values / target_portfolio_value
-            excess_amounts = (excess_amount * weights_norm).round(decimals=2)
-            target_ticker_values = target_ticker_values - excess_amounts
+            sell_values_for_tax = np.where(filtered_ticker_value_deltas < 0.0, filtered_ticker_value_deltas, 0.0)
+            sell_share_deltas_for_tax = (sell_values_for_tax / price_data).round(decimals=3)
+            next_tax_estimate = 0.0
+            for i, share_delta in enumerate(sell_share_deltas_for_tax):
+                shares_to_sell = abs(float(share_delta))
+                if shares_to_sell <= 0.0:
+                    continue
+                next_tax_estimate += self._estimate_sale_tax(i, shares_to_sell, float(price_data[i]), date)
+            next_tax_estimate = round(next_tax_estimate, 2)
+            if abs(next_tax_estimate - tax_estimate) < 0.005:
+                break
+            tax_estimate = next_tax_estimate
 
-        # Get ticker value deltas >= $1 or <= -$1
-        ticker_value_deltas = target_ticker_values - current_ticker_values
-        filtered_ticker_value_deltas = np.where(
-            (ticker_value_deltas >= 1.0) | (ticker_value_deltas <= -1.0),
-            ticker_value_deltas,
-            0.0,
-        )
-
-        # Return if value deltas are insignificant to rebalance
         if np.all(filtered_ticker_value_deltas == 0.0):
-            self._sweep_residual_to_cash(price_data, date)
             return
-
-        # Get capital available for rebalancing, including existing cash.
-        available_capital = (
-            -np.sum(filtered_ticker_value_deltas[filtered_ticker_value_deltas <= -1.0])
-            + self.unallocated_capital
-        )
-
-        # If available capital exceeds required amount, adjust required amount down
-        required_capital = np.sum(filtered_ticker_value_deltas[filtered_ticker_value_deltas >= 1.0])
-        if required_capital > available_capital:
-            excess_amount = required_capital - available_capital
-            weights_exc = filtered_ticker_value_deltas / required_capital
-            excess_amounts = (excess_amount * weights_exc).round(decimals=2)
-            filtered_ticker_value_deltas = filtered_ticker_value_deltas - excess_amounts
 
         sell_values = np.where(filtered_ticker_value_deltas < 0.0, filtered_ticker_value_deltas, 0.0)
         buy_values = np.where(filtered_ticker_value_deltas > 0.0, filtered_ticker_value_deltas, 0.0)
 
         sell_share_deltas = (sell_values / price_data).round(decimals=3)
+        available_capital = 0.0
         for i, share_delta in enumerate(sell_share_deltas):
             shares_to_sell = abs(float(share_delta))
             if shares_to_sell <= 0.0:
                 continue
             proceeds = round(shares_to_sell * float(price_data[i]), 2)
             tax_due = self._realize_sale_tax(i, shares_to_sell, float(price_data[i]), date)
-            self.unallocated_capital += max(0.0, proceeds - tax_due)
+            available_capital += max(0.0, proceeds - tax_due)
 
         required_buy_capital = float(np.sum(buy_values).round(decimals=2))
-        if required_buy_capital > self.unallocated_capital:
-            scale = self.unallocated_capital / required_buy_capital if required_buy_capital > 0.0 else 0.0
+        if required_buy_capital > available_capital:
+            scale = available_capital / required_buy_capital if required_buy_capital > 0.0 else 0.0
             buy_values = (buy_values * scale).round(decimals=2)
 
         buy_share_deltas = (buy_values / price_data).round(decimals=3)
         spent = 0.0
         for i, shares in enumerate(buy_share_deltas):
             spent += self._buy_shares(i, float(shares), float(price_data[i]), date)
-        self.unallocated_capital = max(0.0, self.unallocated_capital - spent)
 
-        self._sweep_residual_to_cash(price_data, date)
+        self._sweep_to_cash(price_data, max(0.0, available_capital - spent), date)
 
         if trace:
             print(
@@ -501,7 +553,7 @@ class Portfolio:
                 continue
             if i >= len(leg_weights):
                 break
-            if float(leg_weights[i]) > 1e-12:
+            if float(leg_weights[i]) > 0.0:
                 has_additional_risk = True
                 break
             holding_value = float(self.current_shares[i] * price_data[i])
@@ -512,33 +564,60 @@ class Portfolio:
         cash_ratio_for_sizing = None if (max_cash_ratio is not None and has_additional_risk) else max_cash_ratio
         do_rebalance = rebalance and has_additional_risk
 
-        holdings_value = np.sum(self.current_shares * price_data).round(decimals=2)
-        if cash_ratio_for_sizing is None:
-            target_value = (target_weight * holdings_value).round(decimals=2)
-        else:
-            portfolio_value = round(float(holdings_value + self.unallocated_capital), 2)
-            target_cash = round(cash_ratio_for_sizing * portfolio_value, 2)
-            target_value = (
-                self.current_shares[ticker_index] * price_data[ticker_index]
-                - max(0.0, target_cash - self.unallocated_capital)
-            ).round(decimals=2)
+        portfolio_value = round(self.current_value(price_data), 2)
+        current_cash = self._cash_value(price_data)
         current_value = (self.current_shares[ticker_index] * price_data[ticker_index]).round(decimals=2)
-        excess_value = current_value - target_value
-        if excess_value < 1.0:
+        price = float(price_data[ticker_index])
+        share_delta = 0.0
+        tax_estimate = 0.0
+
+        if cash_ratio_for_sizing is None:
+            target_value = current_value
+            for _ in range(8):
+                effective_portfolio_value = max(0.0, portfolio_value - tax_estimate)
+                target_value = round(float(target_weight) * effective_portfolio_value, 2)
+                excess_value = current_value - target_value
+                if excess_value < 1.0:
+                    share_delta = 0.0
+                    break
+                share_delta = round(excess_value / price, 3)
+                share_delta = min(share_delta, self.current_shares[ticker_index])
+                next_tax_estimate = self._estimate_sale_tax(ticker_index, share_delta, price, date)
+                if abs(next_tax_estimate - tax_estimate) < 0.005:
+                    break
+                tax_estimate = next_tax_estimate
+        else:
+            target_value = current_value
+            for _ in range(8):
+                effective_portfolio_value = max(0.0, portfolio_value - tax_estimate)
+                target_cash = round(float(cash_ratio_for_sizing) * effective_portfolio_value, 2)
+                required_net_cash = max(0.0, target_cash - current_cash)
+                sale_value = required_net_cash + tax_estimate
+                if sale_value < 1.0:
+                    share_delta = 0.0
+                    break
+                share_delta = round(sale_value / price, 3)
+                share_delta = min(share_delta, self.current_shares[ticker_index])
+                target_value = round(current_value - share_delta * price, 2)
+                next_tax_estimate = self._estimate_sale_tax(ticker_index, share_delta, price, date)
+                if abs(next_tax_estimate - tax_estimate) < 0.005:
+                    break
+                tax_estimate = next_tax_estimate
+
+        if share_delta <= 0.0:
             if trace:
                 print(f"No profit to take from {self.tickers[ticker_index]} on {date_string}")
             return
 
-        share_delta = round(excess_value / price_data[ticker_index], 3)
-        share_delta = min(share_delta, self.current_shares[ticker_index])
-        proceeds = (share_delta * price_data[ticker_index]).round(decimals=2)
-        tax_due = self._realize_sale_tax(ticker_index, share_delta, float(price_data[ticker_index]), date)
-        self.unallocated_capital += max(0.0, proceeds - tax_due)
+        proceeds = round(share_delta * price, 2)
+        tax_due = self._realize_sale_tax(ticker_index, share_delta, price, date)
+        net_proceeds = max(0.0, proceeds - tax_due)
 
-        self._sweep_residual_to_cash(price_data, date)
+        self._sweep_to_cash(price_data, net_proceeds, date)
 
         if trace:
             print(f"Took profit from {self.tickers[ticker_index]}: ${proceeds:,.2f} on {date_string}")
+            print(f"Proceeds: ${proceeds:,.2f} Tax due: ${tax_due:,.2f} = Net ${proceeds - tax_due:,.2f}")
 
         if do_rebalance:
             self.rebalance(date_string, price_data, weights, trace=trace, date=date)
